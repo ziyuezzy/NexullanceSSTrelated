@@ -2,46 +2,52 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 
-# default_config_dict = {
-#     'LOAD':1.0,
-#     'UNIFIED_ROUTER_LINK_BW':16,  #Gbps
-#     'V':36,
-#     'D':5,
-#     'topo_name':"RRG",
-#     'paths':"ASP",
-#     'routing_algo': "nonadaptive", # same for two subnets
-#     'traffic_pattern': "uniform"
-# }
+# Import the simplified anytopo utilities
+try:
+    from .anytopo_utils import create_base_config, run_merlin_experiment, run_efm_experiment
+except ImportError:
+    from anytopo_utils import create_base_config, run_merlin_experiment, run_efm_experiment
 
-def run_sst(config_dict: dict, config_file_path:str, template_file_path:str, num_threads:int = 8):
-    # Define the filename for the duplicate file
-
-    # first dump the config dict
-    with open(config_file_path, 'w') as file:
-        file.write("import numpy as np\n")
-        file.write("config_dict = ")
-        file.write(repr(config_dict))  # Writes the dictionary in a format that Python can interpret
-        # Read the contents of the template file
-        with open(template_file_path, 'r') as template_file:
-            content = template_file.read()
-            # Then write the duplicated contents to the new file
-            file.write(content)
-
-    # # Run a command and wait for it to complete
-    # result = subprocess.run(["sst", config_file_path], capture_output=True, text=True)
-
-    # # Print the output
-    # print(result.stdout)
-
-    # Start a process
-    process = subprocess.Popen(["sst", "-n", f"{num_threads}", config_file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-    # Capture output and errors
-    stdout, stderr = process.communicate()
-
-    print("Output:", stdout)     # Output: Hello from Popen!
-    if stderr:
-        print("Error:", stderr)      # Error: (empty if no error)
-
+# Convenience functions for common use cases
+def run_ember_simulation(topo_name: str, V: int, D: int, benchmark: str,
+                        bench_args: str = "", traffic_trace_file: str = "",
+                        cores_per_ep: int = 1, link_bw: int = 16, num_threads: int = 8):
+    """
+    Convenient function to run Ember MPI benchmarks with anytopo.
+    """
+    base_config = create_base_config(topo_name, V, D, link_bw)
     
+    # Add traffic trace file if specified
+    additional_config = {}
+    if traffic_trace_file:
+        additional_config['traffic_trace_file'] = traffic_trace_file
+    
+    stdout, stderr, returncode = run_efm_experiment(
+        base_config=base_config,
+        benchmark=benchmark,
+        bench_args=bench_args,
+        cores_per_ep=cores_per_ep,
+        num_threads=num_threads,
+        **additional_config
+    )
+    return returncode == 0
+
+def run_synthetic_simulation(topo_name: str, V: int, D: int, load: float,
+                           traffic_pattern: str = "uniform", link_bw: int = 16,
+                           num_threads: int = 8):
+    """
+    Convenient function to run synthetic traffic simulations with anytopo.
+    """
+    base_config = create_base_config(topo_name, V, D, link_bw)
+    
+    stdout, stderr, returncode = run_merlin_experiment(
+        base_config=base_config,
+        load=load,
+        traffic_pattern=traffic_pattern,
+        num_threads=num_threads
+    )
+    return returncode == 0
+
+

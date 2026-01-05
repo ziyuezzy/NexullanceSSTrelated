@@ -25,12 +25,41 @@ class traffic_analyser():
         self.topo_full_name=f"({V}, {D})_{topo_name}_{EPR}_EPR"
         self.suffix=suffix
         self.events=pd.read_csv(input_csv_path)
+        
+        # Handle different CSV formats from old and new traffic tracing
+        if 'event_type' in self.events.columns:
+            # New format from TrafficTracingPlugin
+            self.events = self.events.rename(columns={
+                'event_type': 'type',
+                'Size_Bytes': 'Size_Bytes'
+            })
+            # Convert 'in'/'out' to match old format expectations
+            # 'in' events are injection (packet entering network)
+            # 'out' events are ejection (packet leaving network)
+        elif 'type' not in self.events.columns:
+            # Legacy format handling - try to infer from other columns
+            print("Warning: Unknown CSV format. Expected 'type' or 'event_type' column.")
+            print(f"Available columns: {list(self.events.columns)}")
+            
         self.max_time=self.events["time_ns"].max()
         self.min_time=self.events["time_ns"].min()
         self.pkt_data=self.process_data(processing_method)
 
-        format_string = "traffic_BENCH_{BENCH}_EPR_{EPR}_ROUTING_{ROUTING}_V_{V}_D_{D}_TOPO_{TOPO}_SUFFIX_{SUFFIX}_.csv"
-        self.params = extract_placeholders(format_string, input_csv_path)
+        # Try to extract parameters from filename - handle multiple formats
+        try:
+            format_string = "traffic_BENCH_{BENCH}_EPR_{EPR}_ROUTING_{ROUTING}_V_{V}_D_{D}_TOPO_{TOPO}_SUFFIX_{SUFFIX}_.csv"
+            self.params = extract_placeholders(format_string, input_csv_path)
+        except:
+            # Fallback for new naming convention
+            self.params = {
+                'BENCH': 'Unknown',
+                'EPR': EPR,
+                'ROUTING': 'source_routing', 
+                'V': V,
+                'D': D,
+                'TOPO': topo_name,
+                'SUFFIX': suffix
+            }
 
         
     def process_data(self, _method):
@@ -41,13 +70,23 @@ class traffic_analyser():
             new_data = pd.DataFrame(columns=['srcNIC', 'destNIC', 'Size_Bytes', 'pkt_id', 'enter_time', 'leave_time'])
             for pkt_id in range(num_pkts):
                 pkt_events = self.events[self.events['pkt_id'] == pkt_id]
-                assert(len(pkt_events.index) == 2)
+                assert(len(pkt_events.index) == 2), f"Expected 2 events for packet {pkt_id}, got {len(pkt_events.index)}"
                 pkt_in_event = pkt_events[pkt_events['type'] == 'in']
                 pkt_out_event = pkt_events[pkt_events['type'] == 'out']
-                pkt_in_time = pkt_in_event['time_ns']
-                pkt_out_time = pkt_out_event['time_ns']
-                pkt_src = pkt_in_event['srcNIC']
-                assert(pkt_src.values == pkt_out_event['srcNIC'].values)
+                
+                if len(pkt_in_event) == 0 or len(pkt_out_event) == 0:
+                    print(f"Warning: Missing events for packet {pkt_id}")
+                    continue
+                    
+                pkt_in_time = pkt_in_event['time_ns'].iloc[0]
+                pkt_out_time = pkt_out_event['time_ns'].iloc[0]
+                pkt_src = pkt_in_event['srcNIC'].iloc[0]
+                pkt_dest = pkt_in_event['destNIC'].iloc[0]
+                pkt_size = pkt_in_event['Size_Bytes'].iloc[0]
+                
+                # Verify source/dest consistency
+                assert(pkt_src == pkt_out_event['srcNIC'].iloc[0]), f"Source mismatch for packet {pkt_id}"
+                assert(pkt_dest == pkt_out_event['destNIC'].iloc[0]), f"Dest mismatch for packet {pkt_id}"
                 pkt_dest = pkt_in_event['destNIC']
                 assert(pkt_dest.values == pkt_out_event['destNIC'].values)
                 pkt_size = pkt_in_event['Size_Bytes']

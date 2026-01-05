@@ -2,7 +2,9 @@
 import os
 import sys
 
-graph_data_path=os.environ['PICKLED_DATA']
+# Add topologies directory to path for HPC topology classes
+topologies_path = os.path.join(os.path.dirname(__file__), '..', 'topoResearch', 'topologies')
+sys.path.insert(0, topologies_path)
 
 # Copyright 2009-2024 NTESS. Under the terms
 # of Contract DE-NA0003525 with NTESS, the U.S.
@@ -22,6 +24,15 @@ if __name__ == "__main__":
     from sst.merlin.interface import *
     from sst.merlin.topology import *
     from sst.merlin.targetgen import *
+    
+    try:
+        import networkx as nx
+    except ImportError:
+        print("NetworkX is required. Please install NetworkX and try again.")
+        sys.exit(1)
+    
+    # Import HPC topology utilities
+    from HPC_topo import *
 
     LOAD=config_dict['LOAD']
     UNIFIED_ROUTER_LINK_BW=config_dict['UNIFIED_ROUTER_LINK_BW']
@@ -32,20 +43,22 @@ if __name__ == "__main__":
     Paths=config_dict['paths']
     routing_algo=config_dict['routing_algo']
 
-    topo_full_name=f"({V},{D}){topo_name}topo"
+    topo_full_name=f"({V},{D}){topo_name}"
 
-    ### Setup the topology
-    topo = topoFromGraph()
-    topo.hosts_per_router = EPR
-    topo.algorithm = [routing_algo, routing_algo]
-    # import graph edgelist and path dict
-    topo.graph_num_vertices=V
-    topo.graph_degree=D
-    topo.topo_name=topo_full_name
-    topo.edgelist_file=graph_data_path+f"/from_graph_edgelists/{topo_full_name}_edgelist.pickle"
-    topo.pathdict_file=graph_data_path+f"/from_graph_pathdicts/{Paths}_{topo_full_name}_paths.pickle"
-
-    topo.csv_files_path=graph_data_path+f"/from_graph_pass_down/{Paths}_{topo_full_name}"
+    ### Setup the topology using new anytopo system
+    # Create the HPC topology instance and get NetworkX graph
+    hpc_topo = HPC_topo.initialize_child_instance(topo_name + "topo", V, D)
+    hpc_topo.set_endpoints_per_router(EPR)
+    G = hpc_topo.get_nx_graph()
+    
+    # Setup anytopo
+    topo = topoAny()
+    topo.routing_mode = "source_routing"  # Use source routing mode
+    topo.topo_name = topo_full_name
+    topo.import_graph(G)
+    
+    # Calculate routing table
+    routing_table = topo.calculate_routing_table()
     
     # Set up the routers
     router = hr_router()
@@ -63,14 +76,17 @@ if __name__ == "__main__":
     topo.link_latency = "20ns"
     topo.host_link_latency = "10ns"
     
-    ### set up the endpoint
-    networkif = LinkControl()
-    networkif.link_bw = f"{UNIFIED_ROUTER_LINK_BW}Gb/s"
-    networkif.input_buf_size = "32kB" 
-    networkif.output_buf_size = "32kB" 
-
-    # Set up VN remapping
-    networkif.vn_remap = [0]
+    ### set up the endpoint with endpointNIC and plugins
+    endpointNIC = EndpointNIC(use_reorderLinkControl=False, topo=topo)
+    
+    # Add source routing plugin
+    endpointNIC.addPlugin("sourceRoutingPlugin", routing_table=routing_table)
+    
+    # Configure network interface parameters
+    endpointNIC.link_bw = f"{UNIFIED_ROUTER_LINK_BW}Gb/s"
+    endpointNIC.input_buf_size = "32kB"
+    endpointNIC.output_buf_size = "32kB"
+    endpointNIC.vn_remap = [0]
     
     targetgen = 0
     traffic_pattern = config_dict['traffic_pattern']
@@ -93,7 +109,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     ep = OfferedLoadJob(0,topo.getNumNodes())
-    ep.network_interface = networkif
+    ep.setEndpointNIC(endpointNIC)
     ep.pattern=targetgen
     ep.offered_load = LOAD
     ep.link_bw = f"{UNIFIED_ROUTER_LINK_BW}Gb/s"

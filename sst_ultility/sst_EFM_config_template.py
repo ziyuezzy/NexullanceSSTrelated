@@ -2,7 +2,9 @@
 import os
 import sys
 
-graph_data_path=os.environ['PICKLED_DATA']
+# Add topologies directory to path for HPC topology classes
+topologies_path = os.path.join(os.path.dirname(__file__), '..', 'topoResearch', 'topologies')
+sys.path.insert(0, topologies_path)
 
 # Copyright 2009-2024 NTESS. Under the terms
 # of Contract DE-NA0003525 with NTESS, the U.S.
@@ -22,6 +24,15 @@ if __name__ == "__main__":
     from sst.merlin.interface import *
     from sst.merlin.topology import *
     from sst.ember import *
+    
+    try:
+        import networkx as nx
+    except ImportError:
+        print("NetworkX is required. Please install NetworkX and try again.")
+        sys.exit(1)
+    
+    # Import HPC topology utilities
+    from HPC_topo import *
 
     UNIFIED_ROUTER_LINK_BW=config_dict['UNIFIED_ROUTER_LINK_BW']
     V=config_dict['V']
@@ -46,30 +57,25 @@ if __name__ == "__main__":
 
     EXP_SUFFIX=""
 
-    topo_full_name=f"({V},{D}){topo_name}topo"
+    topo_full_name=f"({V},{D}){topo_name}"
 
-    ### Setup the topology
-    topo = topoFromGraph()
-    topo.hosts_per_router = EPR
-    topo.algorithm = [routing_algo, routing_algo]
-    # import graph edgelist and path dict
-    topo.graph_num_vertices=V
-    topo.graph_degree=D
-    topo.topo_name=topo_full_name
-    topo.edgelist_file=graph_data_path+f"/from_graph_edgelists/{topo_full_name}_edgelist.pickle"
-    topo.pathdict_file=graph_data_path+f"/from_graph_pathdicts/{identifier}_{topo_full_name}_paths.pickle"
-    # topo.pathdict_file=graph_data_path+f"/from_graph_pathdicts/{Paths}_{topo_full_name}_paths.pickle"
-    topo.csv_files_path=graph_data_path+f"/from_graph_pass_down/{identifier}_{topo_full_name}"
+    ### Setup the topology using new anytopo system
+    # Create the HPC topology instance and get NetworkX graph
+    hpc_topo = HPC_topo.initialize_child_instance(topo_name + "topo", V, D)
+    hpc_topo.set_endpoints_per_router(EPR)
+    G = hpc_topo.get_nx_graph()
+    
+    # Setup anytopo
+    topo = topoAny()
+    topo.routing_mode = "source_routing"  # Use source routing mode
+    topo.topo_name = topo_full_name
+    topo.import_graph(G)
+    
+    # Calculate routing table
+    routing_table = topo.calculate_routing_table()
 
-    defaults_z = PlatformDefinition.compose("firefly-defaults-Z",[("firefly-defaults","ALL")])
-    defaults_z.addParamSet("nic",{
-        "num_vNics": CPE,
-        "gen_InterNIC_traffic_trace": gen_InterNIC_traffic_trace,
-        "interNIC_traffic_tracefile_path": Traffic_trace_file,
-        # "interNIC_traffic_tracefile_path":f"traffic_BENCH_{BENCH+BENCH_PARAMS}_EPR_{EPR}_ROUTING_{Paths}_V_{V}_D_{D}_TOPO_{topo_name}_SUFFIX_{EXP_SUFFIX}_.csv",
-        })
-    PlatformDefinition.setCurrentPlatform("firefly-defaults-Z")
-    # PlatformDefinition.setCurrentPlatform("firefly-defaults")  
+    # Use standard firefly defaults - traffic tracing is now handled by endpointNIC plugins
+    PlatformDefinition.setCurrentPlatform("firefly-defaults")  
 
 
     # Set up the routers
@@ -88,17 +94,26 @@ if __name__ == "__main__":
     topo.link_latency = "20ns"
     topo.host_link_latency = "10ns"
     
-    ### set up the endpoint
-    networkif = ReorderLinkControl()
-    networkif.link_bw = f"{UNIFIED_ROUTER_LINK_BW}GB/s"
-    networkif.input_buf_size = "32kB"
-    networkif.output_buf_size = "32kB"
-
-    # Set up VN remapping
-    networkif.vn_remap = [0]
+    ### set up the endpoint with endpointNIC and plugins
+    endpointNIC = EndpointNIC(use_reorderLinkControl=True, topo=topo)
+    
+    # Add source routing plugin
+    endpointNIC.addPlugin("sourceRoutingPlugin", routing_table=routing_table)
+    
+    # Add traffic tracing plugin if enabled
+    if gen_InterNIC_traffic_trace:
+        endpointNIC.addPlugin("trafficTracingPlugin", 
+                             csv_filename=Traffic_trace_file,
+                             enable_tracing=True)
+    
+    # Configure network interface parameters
+    endpointNIC.link_bw = f"{UNIFIED_ROUTER_LINK_BW}Gb/s"
+    endpointNIC.input_buf_size = "32kB"
+    endpointNIC.output_buf_size = "32kB"
+    endpointNIC.vn_remap = [0]
     
     ep = EmberMPIJob(0,topo.getNumNodes(), numCores = CPE*EPR)
-    ep.network_interface = networkif
+    ep.setEndpointNIC(endpointNIC)
     ep.addMotif("Init")
     ep.addMotif(BENCH+BENCH_PARAMS)
     ep.addMotif("Fini")

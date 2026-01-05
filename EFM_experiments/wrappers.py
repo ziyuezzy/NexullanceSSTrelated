@@ -7,7 +7,12 @@ import re
 import csv
 from paths import SST_EFM_TEMP_PATH, REPO_ROOT
 
-from sst_ultility.ultility import run_sst
+# Import updated SST utilities
+try:
+    from sst_ultility.anytopo_utils import create_base_config, run_efm_experiment
+except ImportError:
+    sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'sst_ultility'))
+    from anytopo_utils import create_base_config, run_efm_experiment
 
 example_config_dict = {
     'UNIFIED_ROUTER_LINK_BW':16,  #Gbps
@@ -25,23 +30,41 @@ example_config_dict = {
 
 def run_EFM(benchmark:str="FFT3D", benchargs:str=" nx=100 ny=100 nz=100 npRow=12", 
             routing:str = "nonadaptive", traffic_trace_file:str="", default_config_dict:dict = example_config_dict):
-    from topoResearch.pickle_data import pickle_paths
-
-    config_dict = default_config_dict.copy()
-    config_dict['routing_algo']=routing
-    config_dict['benchmark']=benchmark
-    config_dict['benchargs']=benchargs
+    """
+    Run EFM (Ember) simulation using the new anytopo system.
+    """
+    
+    V = default_config_dict['V']
+    D = default_config_dict['D']
+    topo_name = default_config_dict['topo_name']
+    cores_per_ep = default_config_dict['Cores_per_EP']
+    link_bw = default_config_dict['UNIFIED_ROUTER_LINK_BW']
+    
+    # Create base config
+    base_config = create_base_config(topo_name, V, D, link_bw)
+    
+    # Add optional parameters
+    additional_config = {}
     if traffic_trace_file:
-        config_dict["traffic_trace_file"]=traffic_trace_file
-
-    pickle_paths(config_dict['topo_name'], (config_dict['V'], config_dict['D']))
-
-    # Capture the output
-    output = io.StringIO()
-    with redirect_stdout(output):
-        run_sst(config_dict, "EFM_auto_config.py", SST_EFM_TEMP_PATH, 8) 
-    # Get the content of the output as a string
-    captured_output = output.getvalue()
+        additional_config['traffic_trace_file'] = traffic_trace_file
+    
+    # Use the new simplified anytopo system
+    stdout, stderr, returncode = run_efm_experiment(
+        base_config=base_config,
+        benchmark=benchmark,
+        bench_args=benchargs,
+        cores_per_ep=cores_per_ep,
+        num_threads=8,
+        **additional_config
+    )
+    
+    if returncode != 0:
+        print(f"SST simulation failed with return code {returncode}")
+        if stderr:
+            print("Error output:", stderr)
+        return None
+        
+    captured_output = stdout
     # print("Captured Output:", captured_output)
     # Define regex pattern to capture the simulated time at the end
     time_pattern = re.compile(r'Simulation is complete, simulated time:\s+([\d\.]+)\s+([a-z]+)')
