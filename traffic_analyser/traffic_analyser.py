@@ -26,40 +26,32 @@ class traffic_analyser():
         self.suffix=suffix
         self.events=pd.read_csv(input_csv_path)
         
-        # Handle different CSV formats from old and new traffic tracing
+        # Expect new format from TrafficTracingPlugin
         if 'event_type' in self.events.columns:
-            # New format from TrafficTracingPlugin
+            # Rename to standard column names
             self.events = self.events.rename(columns={
-                'event_type': 'type',
-                'Size_Bytes': 'Size_Bytes'
+                'event_type': 'type'
             })
-            # Convert 'in'/'out' to match old format expectations
-            # 'in' events are injection (packet entering network)
-            # 'out' events are ejection (packet leaving network)
         elif 'type' not in self.events.columns:
-            # Legacy format handling - try to infer from other columns
-            print("Warning: Unknown CSV format. Expected 'type' or 'event_type' column.")
-            print(f"Available columns: {list(self.events.columns)}")
+            raise ValueError(
+                "Invalid CSV format. Expected TrafficTracingPlugin format with 'event_type' column.\n"
+                f"Available columns: {list(self.events.columns)}"
+            )
             
         self.max_time=self.events["time_ns"].max()
         self.min_time=self.events["time_ns"].min()
         self.pkt_data=self.process_data(processing_method)
 
-        # Try to extract parameters from filename - handle multiple formats
-        try:
-            format_string = "traffic_BENCH_{BENCH}_EPR_{EPR}_ROUTING_{ROUTING}_V_{V}_D_{D}_TOPO_{TOPO}_SUFFIX_{SUFFIX}_.csv"
-            self.params = extract_placeholders(format_string, input_csv_path)
-        except:
-            # Fallback for new naming convention
-            self.params = {
-                'BENCH': 'Unknown',
-                'EPR': EPR,
-                'ROUTING': 'source_routing', 
-                'V': V,
-                'D': D,
-                'TOPO': topo_name,
-                'SUFFIX': suffix
-            }
+        # Extract parameters from config or use provided values
+        self.params = {
+            'BENCH': 'Unknown',
+            'EPR': EPR,
+            'ROUTING': 'source_routing', 
+            'V': V,
+            'D': D,
+            'TOPO': topo_name,
+            'SUFFIX': suffix
+        }
 
         
     def process_data(self, _method):

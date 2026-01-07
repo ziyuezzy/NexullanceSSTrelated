@@ -8,4 +8,5 @@ archive/
 nohup.out
 archive/
 *auto_config.py
-traffic_traces/
+traffic_traces/*
+simulation_results/*

@@ -2,9 +2,7 @@
 import os
 import sys
 
-# Add topologies directory to path for HPC topology classes
-topologies_path = os.path.join(os.path.dirname(__file__), '..', 'topoResearch', 'topologies')
-sys.path.insert(0, topologies_path)
+# Note: topologies path is added by ultility.py when generating config
 
 # Copyright 2009-2024 NTESS. Under the terms
 # of Contract DE-NA0003525 with NTESS, the U.S.
@@ -32,7 +30,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     # Import HPC topology utilities
-    from HPC_topo import *
+    from HPC_topo import HPC_topo
 
     LOAD=config_dict['LOAD']
     UNIFIED_ROUTER_LINK_BW=config_dict['UNIFIED_ROUTER_LINK_BW']
@@ -40,8 +38,12 @@ if __name__ == "__main__":
     D=config_dict['D']
     EPR=(D+1)//2
     topo_name=config_dict['topo_name']
-    Paths=config_dict['paths']
-    routing_algo=config_dict['routing_algo']
+    
+    # Traffic tracing configuration
+    gen_traffic_trace = 'traffic_trace_file' in config_dict
+    traffic_trace_file = ""
+    if gen_traffic_trace:
+        traffic_trace_file = config_dict['traffic_trace_file']
 
     topo_full_name=f"({V},{D}){topo_name}"
 
@@ -81,6 +83,12 @@ if __name__ == "__main__":
     
     # Add source routing plugin
     endpointNIC.addPlugin("sourceRoutingPlugin", routing_table=routing_table)
+    
+    # Add traffic tracing plugin if enabled
+    if gen_traffic_trace:
+        endpointNIC.addPlugin("trafficTracingPlugin",
+                             csv_filename=traffic_trace_file,
+                             enable_tracing=True)
     
     # Configure network interface parameters
     endpointNIC.link_bw = f"{UNIFIED_ROUTER_LINK_BW}Gb/s"
@@ -132,11 +140,3 @@ if __name__ == "__main__":
     # })
     # # sst.enableAllStatisticsForComponentType("merlin.linkcontrol", {"type":"sst.AccumulatorStatistic","rate":"0ns"})
     # sst.enableAllStatisticsForAllComponents({"type":"sst.AccumulatorStatistic","rate":"0us"})
-
-    # delete python objects:
-    del topo
-    del router
-    del networkif
-    del targetgen
-    del ep
-    del system
