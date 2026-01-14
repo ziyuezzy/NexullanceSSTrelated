@@ -4,7 +4,12 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import sys
 import os
-from .helpers import *
+
+# Handle both relative and absolute imports
+try:
+    from .helpers import *
+except ImportError:
+    from helpers import *
 
 class demand_matrix_analyser():
     """
@@ -70,8 +75,19 @@ class demand_matrix_analyser():
         Returns:
             tuple: (sampling_interval_ns, list of (timestamp_ns, demand_matrix) tuples)
         """
-        # Extract source IDs from ComponentName (offered_load_X)
-        self.raw_data['src_id'] = self.raw_data['ComponentName'].str.extract(r'offered_load_(\d+)')[0].astype(int)
+        # Extract source IDs from ComponentName
+        # Try format: 'offered_load_X'
+        src_ids = self.raw_data['ComponentName'].str.extract(r'offered_load_(\d+)')[0]
+        
+        # If that fails, try alternative format: 'nicX:...'
+        if src_ids.isna().all():
+            src_ids = self.raw_data['ComponentName'].str.extract(r'nic(\d+):')[0]
+        
+        # If still no match, try extracting from any format with numbers
+        if src_ids.isna().any():
+            raise ValueError("Unable to extract source IDs from ComponentName")
+        
+        self.raw_data['src_id'] = src_ids.astype(int)
         
         # Extract destination IDs from StatisticSubId (dst_Y)
         self.raw_data['dst_id'] = self.raw_data['StatisticSubId'].str.extract(r'dst_(\d+)')[0].astype(int)

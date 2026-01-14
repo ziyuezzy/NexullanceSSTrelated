@@ -1,1 +1,0 @@
-from sst_ultility.ultility import run_merlin_simulation

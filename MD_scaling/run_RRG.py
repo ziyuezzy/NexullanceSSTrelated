@@ -3,7 +3,7 @@ import sys
 from topoResearch.topologies.HPC_topo import HPC_topo
 from topoResearch.nexullance.ultility import nexullance_exp_container
 import topoResearch.global_helpers as gl
-from traffic_analyser.traffic_analyser import traffic_analyser
+from archive.traffic_analyser import traffic_analyser
 from EFM_experiments.wrappers import run_EFM
 import csv
 from paths import REPO_ROOT

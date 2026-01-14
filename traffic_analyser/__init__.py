@@ -1,4 +1,3 @@
-from .traffic_analyser import traffic_analyser
-from .demand_matrix_analyser import demand_matrix_analyser
+# Empty __init__.py - modules are imported directly
+# Direct imports work better for SST config generation workflow
 
-__all__ = ['traffic_analyser', 'demand_matrix_analyser']

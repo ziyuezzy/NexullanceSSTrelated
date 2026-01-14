@@ -1,10 +1,4 @@
-
-import os
-import sys
-
-# Add topologies directory to path for HPC topology classes
-topologies_path = os.path.join(os.path.dirname(__file__), '..', 'topoResearch', 'topologies')
-sys.path.insert(0, topologies_path)
+# Note: imports are added by ultility.py when generating config
 
 # Copyright 2009-2024 NTESS. Under the terms
 # of Contract DE-NA0003525 with NTESS, the U.S.
@@ -30,32 +24,29 @@ if __name__ == "__main__":
     except ImportError:
         print("NetworkX is required. Please install NetworkX and try again.")
         sys.exit(1)
-    
-    # Import HPC topology utilities
-    from HPC_topo import *
 
     UNIFIED_ROUTER_LINK_BW=config_dict['UNIFIED_ROUTER_LINK_BW']
     V=config_dict['V']
     D=config_dict['D']
     EPR=(D+1)//2
     topo_name=config_dict['topo_name']
-    identifier=config_dict['identifier']
-    routing_algo=config_dict['routing_algo']
-
-    # BENCH="FFT3D"
-    # BENCH_PARAMS=" nx=100 ny=100 nz=100 npRow=12"
-    # CPE=1
+    
     BENCH=config_dict['benchmark']
     BENCH_PARAMS=config_dict['benchargs']
     CPE=config_dict['Cores_per_EP']
 
-    gen_InterNIC_traffic_trace: bool = 'traffic_trace_file' in config_dict.keys()
-    Traffic_trace_file=""
-    if gen_InterNIC_traffic_trace:
-        Traffic_trace_file=config_dict['traffic_trace_file']
-
-
-    EXP_SUFFIX=""
+    # Traffic demand collection configuration
+    gen_traffic_demand = 'traffic_demand_file' in config_dict
+    traffic_demand_file = config_dict['traffic_demand_file'] if gen_traffic_demand else ""
+    traffic_collection_rate = config_dict.get('traffic_collection_rate', '10us')
+    throughput_file = config_dict.get('throughput_file', f"efm_{BENCH}.csv")
+    
+    # Nexullance optimization configuration
+    use_nexullance_routing = 'nexullance_demand_matrix_file' in config_dict
+    nexullance_demand_file = config_dict.get('nexullance_demand_matrix_file', '')
+    Cap_core = config_dict.get('Cap_core', UNIFIED_ROUTER_LINK_BW)
+    Cap_access = config_dict.get('Cap_access', UNIFIED_ROUTER_LINK_BW)
+    demand_scaling_factor = config_dict.get('demand_scaling_factor', 1.0)
 
     topo_full_name=f"({V},{D}){topo_name}"
 
@@ -71,8 +62,45 @@ if __name__ == "__main__":
     topo.topo_name = topo_full_name
     topo.import_graph(G)
     
-    # Calculate routing table
-    routing_table = topo.calculate_routing_table()
+    # Calculate routing table (default or optimized)
+    if use_nexullance_routing:
+        print(f"Running Nexullance optimization with demand matrix from: {nexullance_demand_file}")
+        
+        # Load and analyze traffic demand
+        analyzer = demand_matrix_analyser(
+            input_csv_path=nexullance_demand_file,
+            V=V, D=D, topo_name=topo_name, EPR=EPR,
+            Cap_core=Cap_core, Cap_access=Cap_access,
+            suffix="nexullance_opt",
+            use_per_interval=True
+        )
+        
+        # Get accumulated demand matrix
+        M_EPs = analyzer.get_accumulated_demand_matrix(plot=False)
+        print(f"Loaded demand matrix shape: {M_EPs.shape}")
+        print(f"Demand matrix sum: {np.sum(M_EPs):.2e}")
+        
+        # Run Nexullance IT optimization
+        nexu_container = nexullance_exp_container(
+            topo_name=topo_name, V=V, D=D, EPR=EPR,
+            Cap_core=Cap_core, Cap_access=Cap_access,
+            Demand_scaling_factor=demand_scaling_factor
+        )
+        
+        nexullance_RT = nexu_container.run_nexullance_IT_return_RT(
+            M_EPs=M_EPs,
+            traffic_name="optimized",
+            _debug=False
+        )
+        print(f"Nexullance optimization complete. Routing table size: {len(nexullance_RT)}")
+        
+        # Convert nexullance routing table to SST format
+        routing_table = convert_nexullance_RT_to_SST_format(nexullance_RT)
+        print(f"Routing table converted to SST format with {len(routing_table)} source endpoints")
+    else:
+        # Use default shortest path routing
+        routing_table = topo.calculate_routing_table()
+        print(f"Using default shortest path routing")
 
     # Use standard firefly defaults - traffic tracing is now handled by endpointNIC plugins
     PlatformDefinition.setCurrentPlatform("firefly-defaults")  
@@ -100,11 +128,9 @@ if __name__ == "__main__":
     # Add source routing plugin
     endpointNIC.addPlugin("sourceRoutingPlugin", routing_table=routing_table)
     
-    # Add traffic tracing plugin if enabled
-    if gen_InterNIC_traffic_trace:
-        endpointNIC.addPlugin("trafficTracingPlugin", 
-                             csv_filename=Traffic_trace_file,
-                             enable_tracing=True)
+    # Add traffic demand collection plugin if enabled
+    if gen_traffic_demand:
+        endpointNIC.addPlugin("demandMatrixPlugin", metric="bytes")
     
     # Configure network interface parameters
     endpointNIC.link_bw = f"{UNIFIED_ROUTER_LINK_BW}Gb/s"
@@ -125,22 +151,24 @@ if __name__ == "__main__":
 
     system.build()
 
-    # sst.setStatisticLoadLevel(9)
-
-    # sst.setStatisticOutput("sst.statOutputCSV");
-    # sst.setStatisticOutputOptions({
-    #     "filepath" : "stats.csv",
-    #     "separator" : ", "
-    # })
-
-    # sst.setStatisticLoadLevel(10)
-
-    # sst.setStatisticOutput("sst.statOutputCSV");
-    # sst.setStatisticOutputOptions({
-    #     "filepath" : f"statistics_BENCH_{BENCH+BENCH_PARAMS}_EPR_{EPR}_ROUTING_{PATHS}_V_{V}_D_{D}_TOPO_{topo_name}_SUFFIX_{EXP_SUFFIX}_.csv"                                                                                                                                                                                                                                                                                                     ,
-    #     "separator" : ", "
-    # })
-    # sst.enableAllStatisticsForComponentType("merlin.linkcontrol", {"type":"sst.AccumulatorStatistic","rate":"0ns"})
-
-    # sst.enableAllStatisticsForAllComponents({"type":"sst.AccumulatorStatistic","rate":"0ns"})
+    # Enable statistics collection
+    if gen_traffic_demand:
+        # Collect traffic demand matrix
+        sst.setStatisticLoadLevel(1)
+        sst.setStatisticOutput("sst.statOutputCSV")
+        sst.setStatisticOutputOptions({
+            "filepath" : traffic_demand_file,
+            "separator" : ", "
+        })
+        sst.enableAllStatisticsForComponentType("merlin.demandMatrixPlugin",
+                                            {"type":"sst.AccumulatorStatistic","rate":traffic_collection_rate})
+    else:
+        # Collect throughput statistics
+        sst.setStatisticLoadLevel(10)
+        sst.setStatisticOutput("sst.statOutputCSV");
+        sst.setStatisticOutputOptions({
+            "filepath" : throughput_file,
+            "separator" : ", "
+        })
+        sst.enableAllStatisticsForComponentType("merlin.linkcontrol", {"type":"sst.AccumulatorStatistic","rate":"0ns"})
 

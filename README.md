@@ -68,7 +68,7 @@ stdout, stderr, returncode = run_merlin_experiment(
 ```python
 from traffic_analyser.traffic_analyser import traffic_analyser
 
-# Analyze packet-level traces from new TrafficTracingPlugin
+# Analyze packet-level traces from new demandMatrixPlugin
 analyzer = traffic_analyser(
     input_csv_path="fft3d_trace.csv",
     V=36, D=5,
