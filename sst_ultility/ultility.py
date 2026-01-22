@@ -17,7 +17,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from paths import SIMULATION_RESULTS_DIR, TOPOLOGIES_DIR, TRAFFIC_TRACES_DIR
+from paths import SIMULATION_RESULTS_DIR, TOPOLOGIES_DIR, TRAFFIC_TRACES_DIR, NEXULLANCE_MODULE_PATH, NEXULLANCE_CONTAINER_CLASS
 
 def convert_nexullance_RT_to_SST_format(nexullance_RT):
     """
@@ -30,7 +30,7 @@ def convert_nexullance_RT_to_SST_format(nexullance_RT):
     where path is a list of hops excluding source vertex
     
     Args:
-        nexullance_RT: Routing table from Nexullance IT/MP optimizer
+        nexullance_RT: Routing table from Nexullance SD/MD optimizer
             Format: dict with (src, dst) tuple keys mapping to list of (path, weight) tuples
             
     Returns:
@@ -227,9 +227,9 @@ def run_merlin_experiment_with_nexullance(topo_name: str, V: int, D: int, load: 
                                           demand_scaling_factor: float = 1.0):
     """
     Run a complete Merlin experiment with Nexullance optimization:
-    1. Run simulation to collect traffic demand
+    1. Run shortest-path (baseline) simulation to collect traffic demand and throughput
     2. Use collected demand to optimize routing with Nexullance
-    3. Run simulation again with optimized routing to measure performance
+    3. Run simulation with Nexullance routing to measure optimized performance
     
     Args:
         topo_name: Topology name (e.g., "RRG", "Slimfly", "DDF")
@@ -253,67 +253,67 @@ def run_merlin_experiment_with_nexullance(topo_name: str, V: int, D: int, load: 
     if Cap_access is None:
         Cap_access = link_bw
     
-    # Step 1: Run simulation to collect traffic demand
+    # Base configuration
     config = {
         'UNIFIED_ROUTER_LINK_BW': link_bw,
         'V': V,
         'D': D,
         'topo_name': topo_name,
         'LOAD': load,
-        'traffic_pattern': traffic_pattern
+        'traffic_pattern': traffic_pattern,
+        'routing_method': 'shortest_path'  # Baseline uses shortest path
     }
     
     demand_file = _generate_traffic_demand_filename(config, 'merlin')
     baseline_throughput_file = _generate_throughput_filename(config, 'merlin')
-    # Append '_baseline' to differentiate from optimized
-    baseline_throughput_file = baseline_throughput_file.replace('.csv', '_baseline.csv')
+    baseline_throughput_file = baseline_throughput_file.replace('.csv', '_shortest_path.csv')
     
-    # Check if demand file already exists
-    if Path(demand_file).exists():
+    # STEP 1: Run shortest-path baseline to collect demand and throughput
+    if not Path(demand_file).exists() or not Path(baseline_throughput_file).exists():
         print("\n" + "=" * 80)
-        print("STEP 1: Traffic demand matrix already exists, skipping collection...")
+        print("STEP 1: Running SHORTEST-PATH baseline simulation...")
+        print("=" * 80)
+        print("  - Collecting traffic demand matrix")
+        print("  - Measuring baseline throughput")
+        
+        # First, collect demand matrix if needed
+        if not Path(demand_file).exists():
+            demand_config = config.copy()
+            demand_config['traffic_demand_file'] = demand_file
+            demand_config['traffic_collection_rate'] = traffic_collection_rate
+            
+            print(f"Demand will be saved to: {demand_file}")
+            stdout, stderr, returncode, sim_dir = _run_sst(demand_config, 'merlin', num_threads)
+            
+            if returncode != 0:
+                print(f"Error: Demand collection failed with return code {returncode}")
+                return None
+        
+        # Then, measure baseline throughput if needed
+        if not Path(baseline_throughput_file).exists():
+            baseline_config = config.copy()
+            baseline_config['throughput_file'] = baseline_throughput_file
+            
+            print(f"Baseline throughput will be saved to: {baseline_throughput_file}")
+            stdout, stderr, returncode, sim_dir = _run_sst(baseline_config, 'merlin', num_threads)
+            
+            if returncode != 0:
+                print(f"Error: Baseline throughput measurement failed with return code {returncode}")
+                return None
+    else:
+        print("\n" + "=" * 80)
+        print("STEP 1: Baseline data already exists, skipping...")
         print("=" * 80)
         print(f"Using existing demand file: {demand_file}")
-    else:
-        print("\n" + "=" * 80)
-        print("STEP 1: Running simulation to collect traffic demand...")
-        print("=" * 80)
-        demand_config = config.copy()
-        demand_config['traffic_demand_file'] = demand_file
-        demand_config['traffic_collection_rate'] = traffic_collection_rate
-        
-        print(f"Demand will be saved to: {demand_file}")
-        stdout, stderr, returncode = _run_sst(demand_config, 'merlin', num_threads)
-        
-        if returncode != 0:
-            print(f"Error: Simulation failed with return code {returncode}")
-            return None
-    
-    # Always run baseline throughput collection if file doesn't exist
-    if not Path(baseline_throughput_file).exists():
-        print("\n" + "=" * 80)
-        print("Collecting baseline throughput statistics...")
-        print("=" * 80)
-        baseline_config = config.copy()
-        baseline_config['throughput_file'] = baseline_throughput_file
-        baseline_config['traffic_collection_rate'] = traffic_collection_rate
-        
-        print(f"Baseline throughput will be saved to: {baseline_throughput_file}")
-        stdout, stderr, returncode = _run_sst(baseline_config, 'merlin', num_threads)
-        
-        if returncode != 0:
-            print(f"Error: Baseline simulation failed with return code {returncode}")
-            return None
-    else:
-        print(f"Using existing baseline throughput file: {baseline_throughput_file}")
+        print(f"Using existing baseline throughput: {baseline_throughput_file}")
     
     print("\n" + "=" * 80)
-    print("STEP 2: Running simulation with Nexullance-optimized routing...")
+    print("STEP 2: Running simulation with NEXULLANCE-optimized routing...")
     print("=" * 80)
     
-    # Step 2-4: Run simulation with nexullance optimization
-    # The nexullance optimization happens inside the SST config file
+    # Step 2: Run simulation with nexullance optimization
     throughput_file = _generate_throughput_filename(config, 'merlin')
+    throughput_file = throughput_file.replace('.csv', '_nexullance.csv')
     
     optimized_config = {
         'UNIFIED_ROUTER_LINK_BW': link_bw,
@@ -330,8 +330,8 @@ def run_merlin_experiment_with_nexullance(topo_name: str, V: int, D: int, load: 
     }
     
     print(f"Using demand matrix: {demand_file}")
-    print(f"Throughput will be saved to: {throughput_file}")
-    stdout, stderr, returncode = _run_sst(optimized_config, 'merlin', num_threads)
+    print(f"Nexullance throughput will be saved to: {throughput_file}")
+    stdout, stderr, returncode, sim_dir = _run_sst(optimized_config, 'merlin', num_threads)
     
     if returncode != 0:
         print(f"Error: Optimized simulation failed with return code {returncode}")
@@ -341,13 +341,13 @@ def run_merlin_experiment_with_nexullance(topo_name: str, V: int, D: int, load: 
     print("STEP 3: Calculating and comparing network throughput...")
     print("=" * 80)
     
-    # Calculate throughput from baseline simulation (linkcontrol stats)
-    print("Calculating baseline throughput from linkcontrol statistics...")
+    # Calculate throughput from baseline simulation (shortest path)
+    print("Calculating SHORTEST-PATH baseline throughput from linkcontrol statistics...")
     baseline_throughput = _calculate_throughput_from_linkcontrol(baseline_throughput_file)
-    print(f"Baseline (default routing) throughput: {baseline_throughput:.4f} Gbps")
+    print(f"Baseline (shortest-path routing) throughput: {baseline_throughput:.4f} Gbps")
     
-    # Calculate throughput from optimized simulation (linkcontrol stats)
-    print("Calculating optimized throughput from linkcontrol statistics...")
+    # Calculate throughput from optimized simulation (nexullance)
+    print("Calculating NEXULLANCE optimized throughput from linkcontrol statistics...")
     optimized_throughput = _calculate_throughput_from_linkcontrol(throughput_file)
     print(f"Optimized (Nexullance routing) throughput: {optimized_throughput:.4f} Gbps")
     
@@ -389,13 +389,15 @@ def run_ember_experiment_with_nexullance(topo_name: str, V: int, D: int,
                                         cores_per_ep: int = 1, link_bw: int = 16,
                                         num_threads: int = 8, traffic_collection_rate: str = "10us",
                                         Cap_core: float = None, Cap_access: float = None,
-                                        demand_scaling_factor: float = 1.0):
+                                        demand_scaling_factor: float = 1.0,
+                                        nexullance_method: str = "SD",
+                                        num_demand_samples: int = 1,
+                                        max_path_length: int = 4):
     """
     Run a complete EFM (Ember) experiment with Nexullance optimization:
-    1. Run simulation to collect traffic demand from MPI benchmark
-    2. Run baseline simulation to get execution time
-    3. Run Nexullance-optimized simulation to get improved execution time
-    4. Compare simulation times to calculate speedup
+    1. Run shortest-path (baseline) simulation to collect traffic demand and measure time
+    2. Run Nexullance-optimized simulation to get improved execution time
+    3. Compare simulation times to calculate speedup
     
     Args:
         topo_name: Topology name (e.g., "RRG", "Slimfly", "DDF")
@@ -410,6 +412,9 @@ def run_ember_experiment_with_nexullance(topo_name: str, V: int, D: int,
         Cap_core: Core link capacity for Nexullance (default: None, uses link_bw)
         Cap_access: Access link capacity for Nexullance (default: None, uses link_bw)
         demand_scaling_factor: Demand scaling factor for Nexullance (default: 1.0)
+        nexullance_method: Nexullance optimization method: 'SD' (single-demand) or 'MD' (multi-demand) (default: 'SD')
+        num_demand_samples: Number of demand samples for MD method (default: 1)
+        max_path_length: Maximum path length for MD method (default: 4)
         
     Returns:
         dict: Dictionary containing simulation times and speedup metrics
@@ -422,7 +427,7 @@ def run_ember_experiment_with_nexullance(topo_name: str, V: int, D: int,
     
     EPR = (D + 1) // 2
     
-    # Configuration for simulations
+    # Base configuration
     config = {
         'UNIFIED_ROUTER_LINK_BW': link_bw,
         'V': V,
@@ -430,51 +435,48 @@ def run_ember_experiment_with_nexullance(topo_name: str, V: int, D: int,
         'topo_name': topo_name,
         'benchmark': benchmark,
         'benchargs': bench_args,
-        'Cores_per_EP': cores_per_ep
+        'Cores_per_EP': cores_per_ep,
+        'routing_method': 'shortest_path'  # Baseline uses shortest path
     }
     
     demand_file = _generate_traffic_trace_filename(config, 'EFM')
     
-    # Track simulation directories for extracting simulation times
-    baseline_sim_dir = None
-    optimized_sim_dir = None
-    
-    # STEP 1: Collect traffic demand matrix
-    if Path(demand_file).exists():
+    # STEP 1: Run shortest-path baseline to collect demand
+    if not Path(demand_file).exists():
         print("\n" + "=" * 80)
-        print("STEP 1: Traffic demand matrix already exists, skipping collection...")
+        print("STEP 1: Running SHORTEST-PATH baseline EFM simulation...")
         print("=" * 80)
-        print(f"Using existing demand file: {demand_file}")
-    else:
-        print("\n" + "=" * 80)
-        print("STEP 1: Running EFM simulation to collect traffic demand...")
-        print("=" * 80)
+        print("  - Collecting traffic demand matrix")
+        print("  - Measuring baseline execution time")
+        
         demand_config = config.copy()
         demand_config['traffic_demand_file'] = demand_file
         demand_config['traffic_collection_rate'] = traffic_collection_rate
         
         print(f"Demand will be saved to: {demand_file}")
-        stdout, stderr, returncode, sim_dir = _run_sst(demand_config, 'EFM', num_threads)
+        stdout, stderr, returncode, baseline_sim_dir = _run_sst(demand_config, 'EFM', num_threads)
         
         if returncode != 0:
-            print(f"Error: Demand collection failed with return code {returncode}")
+            print(f"Error: Baseline simulation with demand collection failed with return code {returncode}")
+            return None
+    else:
+        print("\n" + "=" * 80)
+        print("STEP 1: Demand matrix already exists...")
+        print("=" * 80)
+        print(f"Using existing demand file: {demand_file}")
+        
+        # Run baseline without demand collection to get timing
+        print("Running baseline to measure execution time...")
+        baseline_config = config.copy()
+        stdout, stderr, returncode, baseline_sim_dir = _run_sst(baseline_config, 'EFM', num_threads)
+        
+        if returncode != 0:
+            print(f"Error: Baseline simulation failed with return code {returncode}")
             return None
     
-    # STEP 2: Run baseline simulation (default routing)
+    # STEP 2: Run optimized simulation (Nexullance routing)
     print("\n" + "=" * 80)
-    print("STEP 2: Running baseline EFM simulation (default routing)...")
-    print("=" * 80)
-    
-    baseline_config = config.copy()
-    stdout, stderr, returncode, baseline_sim_dir = _run_sst(baseline_config, 'EFM', num_threads)
-    
-    if returncode != 0:
-        print(f"Error: Baseline simulation failed with return code {returncode}")
-        return None
-    
-    # STEP 3: Run optimized simulation (Nexullance routing)
-    print("\n" + "=" * 80)
-    print("STEP 3: Running EFM simulation with Nexullance-optimized routing...")
+    print(f"STEP 2: Running EFM simulation with NEXULLANCE-optimized routing ({nexullance_method})...")
     print("=" * 80)
     
     optimized_config = {
@@ -488,7 +490,10 @@ def run_ember_experiment_with_nexullance(topo_name: str, V: int, D: int,
         'nexullance_demand_matrix_file': demand_file,
         'Cap_core': Cap_core,
         'Cap_access': Cap_access,
-        'demand_scaling_factor': demand_scaling_factor
+        'demand_scaling_factor': demand_scaling_factor,
+        'nexullance_method': nexullance_method,
+        'num_demand_samples': num_demand_samples,
+        'max_path_length': max_path_length
     }
     
     print(f"Using demand matrix: {demand_file}")
@@ -498,9 +503,9 @@ def run_ember_experiment_with_nexullance(topo_name: str, V: int, D: int,
         print(f"Error: Optimized simulation failed with return code {returncode}")
         return None
     
-    # STEP 4: Extract simulation times and calculate speedup
+    # STEP 3: Extract simulation times and calculate speedup
     print("\n" + "=" * 80)
-    print("STEP 4: Calculating speedup from simulation times...")
+    print("STEP 3: Calculating speedup from simulation times...")
     print("=" * 80)
     
     baseline_output = baseline_sim_dir / f"simulation_output_{baseline_sim_dir.name}.txt"
@@ -510,7 +515,7 @@ def run_ember_experiment_with_nexullance(topo_name: str, V: int, D: int,
     
     baseline_sim_time = _extract_simulation_time_from_output(str(baseline_output))
     if baseline_sim_time:
-        print(f"Baseline (default routing) simulation time: {baseline_sim_time:.4f} ms")
+        print(f"Baseline (shortest-path routing) simulation time: {baseline_sim_time:.4f} ms")
     else:
         print("Error: Could not extract baseline simulation time")
         return None
@@ -560,11 +565,18 @@ def run_ember_experiment_with_nexullance(topo_name: str, V: int, D: int,
 
 def run_merlin_simulation(topo_name: str, V: int, D: int, load: float,
                           traffic_pattern: str = "uniform", link_bw: int = 16,
-                          num_threads: int = 8, output_traffic_demand: bool = True,
+                          num_threads: int = 8, output_traffic_demand: bool = False,
                           traffic_demand_file: str = "", traffic_collection_rate: str = "10us",
+                          routing_method: str = "shortest_path",
+                          calculate_throughput: bool = True,
                           **additional_config):
     """
-    Run Merlin synthetic traffic simulation.
+    Run Merlin synthetic traffic simulation with specified routing method.
+    
+    Supports:
+    - shortest_path: Standard shortest path routing
+    - ugal: Universal Globally-Adaptive Load-balancing routing
+    - Can also collect traffic demand for later Nexullance optimization
     
     Args:
         topo_name: Topology name (e.g., "RRG", "Slimfly", "DDF")
@@ -574,13 +586,16 @@ def run_merlin_simulation(topo_name: str, V: int, D: int, load: float,
         traffic_pattern: Traffic pattern ("uniform", "shift_X", etc.)
         link_bw: Link bandwidth in Gbps (default: 16)
         num_threads: SST threads (default: 8)
-        output_traffic_demand: Whether to generate traffic demand (default: True)
+        output_traffic_demand: Whether to generate traffic demand (default: False)
         traffic_demand_file: Custom path for traffic demand (optional, auto-generated if empty)
         traffic_collection_rate: Statistics collection rate (default: "10us")
+        routing_method: Routing method ('shortest_path', 'ugal', default: 'shortest_path')
+        calculate_throughput: Whether to calculate and return throughput (default: True)
         **additional_config: Additional configuration parameters
         
     Returns:
-        True if successful, False otherwise
+        - If calculate_throughput=True: dict with throughput_gbps, throughput_file, etc.
+        - If calculate_throughput=False: True if successful, False otherwise
     """
     config = {
         'UNIFIED_ROUTER_LINK_BW': link_bw,
@@ -588,7 +603,8 @@ def run_merlin_simulation(topo_name: str, V: int, D: int, load: float,
         'D': D,
         'topo_name': topo_name,
         'LOAD': load,
-        'traffic_pattern': traffic_pattern
+        'traffic_pattern': traffic_pattern,
+        'routing_method': routing_method
     }
     
     # Generate traffic demand filename if tracing is enabled
@@ -597,24 +613,66 @@ def run_merlin_simulation(topo_name: str, V: int, D: int, load: float,
             traffic_demand_file = _generate_traffic_demand_filename(config, 'merlin')
         config['traffic_demand_file'] = traffic_demand_file
         config['traffic_collection_rate'] = traffic_collection_rate
-    else:
-        # Generate throughput filename for non-demand mode
+        print(f"Traffic demand will be saved to: {traffic_demand_file}")
+    
+    if calculate_throughput or not output_traffic_demand:
+        # Generate throughput filename
         throughput_file = _generate_throughput_filename(config, 'merlin')
+        # Add routing method to filename for clarity
+        if routing_method != 'shortest_path':
+            throughput_file = throughput_file.replace('.csv', f'_{routing_method}.csv')
         config['throughput_file'] = throughput_file
         config['traffic_collection_rate'] = traffic_collection_rate
     
+    if calculate_throughput:
+        print(f"\n{'='*80}")
+        print(f"Running {routing_method.upper()} routing simulation")
+        print(f"  Topology: {topo_name} (V={V}, D={D})")
+        print(f"  Load: {load}")
+        print(f"  Traffic: {traffic_pattern}")
+        if 'throughput_file' in config:
+            print(f"  Throughput file: {config['throughput_file']}")
+        print(f"{'='*80}\n")
+    
     config.update(additional_config)
     
-    stdout, stderr, returncode = _run_sst(config, 'merlin', num_threads)
-    return returncode == 0
+    stdout, stderr, returncode, sim_dir = _run_sst(config, 'merlin', num_threads)
+    
+    if returncode != 0:
+        print(f"ERROR: SST simulation failed")
+        return None if calculate_throughput else False
+    
+    # Calculate and return throughput if requested
+    if calculate_throughput and 'throughput_file' in config:
+        try:
+            throughput_gbps = _calculate_throughput_from_linkcontrol(config['throughput_file'])
+            print(f"\n{routing_method.upper()} Throughput: {throughput_gbps:.4f} Gbps")
+            
+            return {
+                'throughput_gbps': throughput_gbps,
+                'throughput_file': config['throughput_file'],
+                'routing_method': routing_method,
+                'sim_dir': str(sim_dir)
+            }
+        except Exception as e:
+            print(f"ERROR: Failed to calculate throughput: {e}")
+            return None
+    
+    return True
 
 
 def run_ember_simulation(topo_name: str, V: int, D: int, benchmark: str,
                         bench_args: str = "", traffic_trace_file: str = "",
                         cores_per_ep: int = 1, link_bw: int = 16, num_threads: int = 8,
-                        enable_traffic_trace: bool = True, **additional_config):
+                        enable_traffic_trace: bool = True, 
+                        routing_method: str = "shortest_path",
+                        **additional_config):
     """
     Run EFM (Ember+Firefly+Merlin) MPI benchmark simulation.
+    
+    Supports:
+    - shortest_path: Standard shortest path routing
+    - ugal: Universal Globally-Adaptive Load-balancing routing
     
     Args:
         topo_name: Topology name (e.g., "RRG", "Slimfly", "DDF")
@@ -627,6 +685,7 @@ def run_ember_simulation(topo_name: str, V: int, D: int, benchmark: str,
         link_bw: Link bandwidth in Gbps (default: 16)
         num_threads: SST threads (default: 8)
         enable_traffic_trace: Whether to generate traffic trace (default: True)
+        routing_method: Routing method ('shortest_path', 'ugal', default: 'shortest_path')
         **additional_config: Additional configuration parameters
         
     Returns:
@@ -639,7 +698,8 @@ def run_ember_simulation(topo_name: str, V: int, D: int, benchmark: str,
         'topo_name': topo_name,
         'benchmark': benchmark,
         'benchargs': bench_args,
-        'Cores_per_EP': cores_per_ep
+        'Cores_per_EP': cores_per_ep,
+        'routing_method': routing_method
     }
     
     # Generate traffic trace filename if tracing is enabled
@@ -651,7 +711,7 @@ def run_ember_simulation(topo_name: str, V: int, D: int, benchmark: str,
     
     config.update(additional_config)
     
-    stdout, stderr, returncode = _run_sst(config, 'EFM', num_threads)
+    stdout, stderr, returncode, sim_dir = _run_sst(config, 'EFM', num_threads)
     return returncode == 0
 
 
@@ -704,8 +764,12 @@ def _run_sst(config_dict: dict, template_type: str, num_threads: int = 8):
         file.write("# Project-specific imports\n")
         file.write("from topoResearch.topologies.HPC_topo import HPC_topo\n")
         file.write("from traffic_analyser.demand_matrix_analyser import demand_matrix_analyser\n")
-        file.write("from topoResearch.nexullance.ultility import nexullance_exp_container\n")
         file.write("from sst_ultility.ultility import convert_nexullance_RT_to_SST_format\n\n")
+        
+        # Write Nexullance configuration
+        file.write("# Nexullance module configuration\n")
+        file.write(f"NEXULLANCE_MODULE_PATH = '{NEXULLANCE_MODULE_PATH}'\n")
+        file.write(f"NEXULLANCE_CONTAINER_CLASS = '{NEXULLANCE_CONTAINER_CLASS}'\n\n")
         
         # Write config dict
         file.write("config_dict = ")

@@ -32,18 +32,23 @@ if __name__ == "__main__":
     EPR=(D+1)//2
     topo_name=config_dict['topo_name']
     
+    # Determine routing method
+    # Priority: if nexullance_demand_matrix_file is present, use nexullance routing
+    # Otherwise, use the specified routing_method (default: shortest_path)
+    if 'nexullance_demand_matrix_file' in config_dict:
+        routing_method = 'nexullance'
+        nexullance_demand_file = config_dict['nexullance_demand_matrix_file']
+        Cap_core = config_dict.get('Cap_core', UNIFIED_ROUTER_LINK_BW)
+        Cap_access = config_dict.get('Cap_access', UNIFIED_ROUTER_LINK_BW)
+        demand_scaling_factor = config_dict.get('demand_scaling_factor', 10.0)
+    else:
+        routing_method = config_dict.get('routing_method', 'shortest_path')
+    
     # Traffic tracing configuration
     gen_traffic_demand = 'traffic_demand_file' in config_dict
     traffic_demand_file = config_dict['traffic_demand_file'] if gen_traffic_demand else ""
     traffic_collection_rate = config_dict.get('traffic_collection_rate', '10us')
     throughput_file = config_dict.get('throughput_file', f"load_{LOAD}.csv")
-    
-    # Nexullance optimization configuration
-    use_nexullance_routing = 'nexullance_demand_matrix_file' in config_dict
-    nexullance_demand_file = config_dict.get('nexullance_demand_matrix_file', '')
-    Cap_core = config_dict.get('Cap_core', UNIFIED_ROUTER_LINK_BW)
-    Cap_access = config_dict.get('Cap_access', UNIFIED_ROUTER_LINK_BW)
-    demand_scaling_factor = config_dict.get('demand_scaling_factor', 1.0)
 
     topo_full_name=f"({V},{D}){topo_name}"
 
@@ -55,12 +60,21 @@ if __name__ == "__main__":
     
     # Setup anytopo
     topo = topoAny()
-    topo.routing_mode = "source_routing"  # Use source routing mode
     topo.topo_name = topo_full_name
     topo.import_graph(G)
     
-    # Calculate routing table (default or optimized)
-    if use_nexullance_routing:
+    # All three routing methods use source routing mode
+    topo.routing_mode = "source_routing"
+    
+    # Calculate routing table and configure routing algorithm based on routing_method
+    if routing_method == 'ugal':
+        # UGAL adaptive routing with source routing table
+        routing_table = topo.calculate_routing_table()
+        topo.source_routing_algo = "UGAL"
+        print(f"Using UGAL adaptive routing with source routing table")
+        
+    elif routing_method == 'nexullance':
+        # Nexullance optimized routing with weighted paths
         print(f"Running Nexullance optimization with demand matrix from: {nexullance_demand_file}")
         
         # Load and analyze traffic demand
@@ -77,8 +91,11 @@ if __name__ == "__main__":
         print(f"Loaded demand matrix shape: {M_EPs.shape}")
         print(f"Demand matrix sum: {np.sum(M_EPs):.2e}")
         
-        # Run Nexullance IT optimization
-        nexu_container = nexullance_exp_container(
+        # Run Nexullance IT optimization using configured module
+        # Import the nexullance module dynamically based on configuration
+        nexullance_module = __import__(NEXULLANCE_MODULE_PATH, fromlist=[NEXULLANCE_CONTAINER_CLASS])
+        nexullance_container_class = getattr(nexullance_module, NEXULLANCE_CONTAINER_CLASS)
+        nexu_container = nexullance_container_class(
             topo_name=topo_name, V=V, D=D, EPR=EPR,
             Cap_core=Cap_core, Cap_access=Cap_access,
             Demand_scaling_factor=demand_scaling_factor
@@ -95,9 +112,12 @@ if __name__ == "__main__":
         # Nexullance RT format: {(src_ep, dst_ep): [(path, weight), ...]}
         # SST required format: {src_ep: {dst_ep: [(weight, path), ...]}}
         routing_table = convert_nexullance_RT_to_SST_format(nexullance_RT)
+        topo.source_routing_algo = "weighted"
         print(f"Routing table converted to SST format with {len(routing_table)} source endpoints")
+        print(f"Using Nexullance weighted routing")
+        
     else:
-        # Use default shortest path routing
+        # Default: shortest path routing
         routing_table = topo.calculate_routing_table()
         print(f"Using default shortest path routing")
     

@@ -166,7 +166,7 @@ class demand_matrix_analyser():
         Sample traffic demand matrices from the aggregated data.
         
         Args:
-            num_samples: Number of samples to generate (must be a divisor of total matrices)
+            num_samples: Number of samples to generate (can be any positive integer)
             filtering_threshold: Minimum max link load threshold for filtering
             auto_scale: Whether to auto-scale the matrices
             
@@ -176,37 +176,47 @@ class demand_matrix_analyser():
         """
         total_matrices = len(self.demand_matrices)
         
-        # Check if num_samples is valid
-        if total_matrices % num_samples != 0:
-            # Find valid sample counts
-            valid_counts = [i for i in range(1, total_matrices + 1) if total_matrices % i == 0]
-            raise ValueError(
-                f"num_samples ({num_samples}) must be a divisor of total matrices ({total_matrices}). "
-                f"Valid values: {valid_counts}"
-            )
+        # Handle edge cases
+        if num_samples <= 0:
+            raise ValueError(f"num_samples must be positive, got {num_samples}")
         
-        # Calculate aggregation factor
-        agg_factor = total_matrices // num_samples
-        new_interval_ns = self.original_interval_ns * agg_factor
+        if num_samples > total_matrices:
+            print(f"Warning: num_samples ({num_samples}) > total_matrices ({total_matrices}). "
+                  f"Using {total_matrices} samples instead.")
+            num_samples = total_matrices
+        
+        # Calculate aggregation factor (round up to ensure we use all matrices)
+        import math
+        agg_factor = math.ceil(total_matrices / num_samples)
         
         # Aggregate matrices
         matrices = []
         for i in range(num_samples):
             # Sum matrices in this group
             start_idx = i * agg_factor
-            end_idx = start_idx + agg_factor
+            end_idx = min(start_idx + agg_factor, total_matrices)  # Don't go past the end
+            
+            # Skip if we've exhausted all matrices
+            if start_idx >= total_matrices:
+                break
             
             aggregated_matrix = np.zeros((self.num_EPs, self.num_EPs))
+            count = 0
             for j in range(start_idx, end_idx):
                 _, matrix = self.demand_matrices[j]
                 aggregated_matrix += matrix
+                count += 1
             
             # Average the aggregated matrix to maintain Gbps units
-            aggregated_matrix /= agg_factor
+            aggregated_matrix /= count
             matrices.append(aggregated_matrix)
         
+        # Calculate effective interval (use average across all groups)
+        avg_group_size = total_matrices / len(matrices)
+        new_interval_ns = self.original_interval_ns * avg_group_size
+        
         # All samples have equal weight since we're uniformly sampling
-        weights = [1.0 / num_samples] * num_samples
+        weights = [1.0 / len(matrices)] * len(matrices)
         
         # Apply filtering and scaling
         filtered_matrices, filtered_weights = self.filter_traffic_demand_matrices(
@@ -214,6 +224,9 @@ class demand_matrix_analyser():
         )
         
         sampling_interval_us = new_interval_ns / 1000  # Convert ns to us
+        
+        print(f"Sampled {len(matrices)} demand matrices from {total_matrices} total matrices")
+        print(f"Average aggregation factor: {avg_group_size:.2f}, effective interval: {sampling_interval_us:.2f} us")
         
         if auto_scale:
             filtered_matrices, scaling_factor = self.auto_scale(filtered_matrices)

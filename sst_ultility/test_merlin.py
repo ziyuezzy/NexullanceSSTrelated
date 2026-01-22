@@ -64,7 +64,7 @@ def main():
         num_threads=8,
         traffic_collection_rate="10us",
         # Cap_core and Cap_access default to link_bw if not specified
-        demand_scaling_factor=1.0
+        demand_scaling_factor=10.0
     )
     
     if results:

@@ -50,6 +50,9 @@ def main():
                         help='Parameter to sweep: count (message size), iterations, or custom list')
     parser.add_argument('--sweep-values', type=str, default='128,256,512,1024,2048',
                         help='Comma-separated values to sweep (e.g., "128,256,512,1024")')
+    parser.add_argument('--routing-method', '-r', type=str, 
+                        choices=['shortest_path', 'ugal', 'nexullance'], default='nexullance',
+                        help='Routing method to use (shortest_path, ugal, or nexullance)')
     
     args = parser.parse_args()
     
@@ -75,6 +78,7 @@ def main():
     print(f"Topology:        {topo_name} (V={V}, D={D})")
     print(f"Benchmark:       {benchmark}")
     print(f"Base Args:       {base_bench_args}")
+    print(f"Routing Method:  {args.routing_method}")
     print(f"Sweep Mode:      {args.sweep_mode}")
     print(f"Sweep Values:    {sweep_values}")
     print(f"Cores per EP:    {cores_per_ep}")
@@ -102,53 +106,105 @@ def main():
             param_label = str(value)
         
         print("\n" + "="*80)
-        print(f"RUNNING EXPERIMENT: {benchmark} {param_label}")
+        print(f"RUNNING EXPERIMENT: {benchmark} {param_label} ({args.routing_method})")
         print("="*80)
         
-        result = run_ember_experiment_with_nexullance(
-            topo_name=topo_name,
-            V=V,
-            D=D,
-            benchmark=benchmark,
-            bench_args=bench_args,
-            cores_per_ep=cores_per_ep,
-            link_bw=link_bw,
-            num_threads=num_threads,
-            traffic_collection_rate=traffic_collection_rate,
-            demand_scaling_factor=demand_scaling_factor
-        )
+        # Run experiment based on routing method
+        if args.routing_method == 'nexullance':
+            # Full Nexullance optimization workflow
+            result = run_ember_experiment_with_nexullance(
+                topo_name=topo_name,
+                V=V,
+                D=D,
+                benchmark=benchmark,
+                bench_args=bench_args,
+                cores_per_ep=cores_per_ep,
+                link_bw=link_bw,
+                num_threads=num_threads,
+                traffic_collection_rate=traffic_collection_rate,
+                demand_scaling_factor=demand_scaling_factor
+            )
+        else:
+            # Simple routing (shortest_path or ugal)
+            from sst_ultility.ultility import run_ember_simulation
+            success = run_ember_simulation(
+                topo_name=topo_name,
+                V=V,
+                D=D,
+                benchmark=benchmark,
+                bench_args=bench_args,
+                cores_per_ep=cores_per_ep,
+                link_bw=link_bw,
+                num_threads=num_threads,
+                enable_traffic_trace=False,
+                routing_method=args.routing_method
+            )
+            # For simple routing, create a minimal result dict
+            result = {'success': success} if success else None
         
         if result:
-            results_list.append({
-                'benchmark': benchmark,
-                'bench_args': bench_args,
-                'param_label': param_label,
-                'baseline_sim_time_ms': result.get('baseline_sim_time_ms'),
-                'optimized_sim_time_ms': result.get('optimized_sim_time_ms'),
-                'speedup': result.get('speedup', None),
-                'improvement_percent': result.get('improvement_percent', None),
-                'demand_file': result['demand_file'],
-                'baseline_output_file': result.get('baseline_output_file'),
-                'optimized_output_file': result.get('optimized_output_file')
-            })
+            # Structure results based on routing method
+            if args.routing_method == 'nexullance':
+                results_list.append({
+                    'routing_method': args.routing_method,
+                    'benchmark': benchmark,
+                    'bench_args': bench_args,
+                    'param_label': param_label,
+                    'baseline_sim_time_ms': result.get('baseline_sim_time_ms'),
+                    'optimized_sim_time_ms': result.get('optimized_sim_time_ms'),
+                    'speedup': result.get('speedup', None),
+                    'improvement_percent': result.get('improvement_percent', None),
+                    'demand_file': result.get('demand_file'),
+                    'baseline_output_file': result.get('baseline_output_file'),
+                    'optimized_output_file': result.get('optimized_output_file')
+                })
+            else:
+                results_list.append({
+                    'routing_method': args.routing_method,
+                    'benchmark': benchmark,
+                    'bench_args': bench_args,
+                    'param_label': param_label,
+                    'success': result.get('success', True),
+                    'baseline_sim_time_ms': None,
+                    'optimized_sim_time_ms': None,
+                    'speedup': None,
+                    'improvement_percent': None,
+                    'demand_file': None,
+                    'baseline_output_file': None,
+                    'optimized_output_file': None
+                })
             print(f"\n✓ {param_label} completed successfully")
         else:
             print(f"\n✗ {param_label} FAILED!")
             results_list.append({
-                'benchmark': benchmark,
-                'bench_args': bench_args,
-                'param_label': param_label,
-                'baseline_sim_time_ms': None,
-                'optimized_sim_time_ms': None,
-                'speedup': None,
-                'improvement_percent': None,
-                'demand_file': None,
-                'baseline_output_file': None,
-                'optimized_output_file': None
-            })
+                'routing_method': args.routing_method,
+                'benchmark' based on routing method
+    print(f"\nPerformance Summary (Routing: {args.routing_method}):")
     
-    # Create results summary
-    print("\n" + "="*80)
+    if args.routing_method == 'nexullance':
+        print("-" * 100)
+        print(f"{'Parameter':<20} {'Baseline (ms)':<18} {'Optimized (ms)':<18} {'Speedup':<10} {'Improvement':<12}")
+        print("-" * 100)
+        
+        for _, row in df.iterrows():
+            if row['baseline_sim_time_ms'] is not None:
+                print(f"{row['param_label']:<20} {row['baseline_sim_time_ms']:<18.4f} "
+                      f"{row['optimized_sim_time_ms']:<18.4f} {row['speedup']:<10.4f} "
+                      f"{row['improvement_percent']:>+11.2f}%")
+            else:
+                print(f"{row['param_label']:<20} {'FAILED':<18} {'FAILED':<18} {'N/A':<10} {'N/A':<12}")
+        
+        print("-" * 100)
+    else:
+        print("-" * 60)
+        print(f"{'Parameter':<20} {'Status':<30}")
+        print("-" * 60)
+        
+        for _, row in df.iterrows():
+            status = '✓ SUCCESS' if row.get('success', False) else '✗ FAILED'
+            print(f"{row['param_label']:<20} {status:<30}")
+        
+        print("-" * 6="*80)
     print("BENCHMARK SWEEP COMPLETE - SUMMARY")
     print("="*80)
     
@@ -161,7 +217,7 @@ def main():
     print("-" * 100)
     
     for _, row in df.iterrows():
-        if row['baseline_sim_time_ms'] is not None:
+        if row['baseline_sim_time_ms'] is not None:routing_method}_{args.
             print(f"{row['param_label']:<20} {row['baseline_sim_time_ms']:<18.4f} "
                   f"{row['optimized_sim_time_ms']:<18.4f} {row['speedup']:<10.4f} "
                   f"{row['improvement_percent']:>+11.2f}%")
@@ -179,16 +235,24 @@ def main():
     print(f"\nResults saved to: {results_csv}")
     
     # Print statistics
-    successful_runs = df[df['baseline_sim_time_ms'].notna()]
-    if len(successful_runs) > 0:
+    if args.routing_method == 'nexullance':
+        successful_runs = df[df['baseline_sim_time_ms'].notna()]
+        if len(successful_runs) > 0:
+            print("\n" + "="*80)
+            print("STATISTICS")
+            print("="*80)
+            print(f"Successful runs:     {len(successful_runs)} / {len(df)}")
+            print(f"Average speedup:     {successful_runs['speedup'].mean():.4f}x")
+            print(f"Best speedup:        {successful_runs['speedup'].max():.4f}x ({successful_runs.loc[successful_runs['speedup'].idxmax(), 'param_label']})")
+            print(f"Worst speedup:       {successful_runs['speedup'].min():.4f}x ({successful_runs.loc[successful_runs['speedup'].idxmin(), 'param_label']})")
+            print(f"Avg improvement:     {successful_runs['improvement_percent'].mean():+.2f}%")
+            print("="*80)
+    else:
+        successful_runs = df[df.get('success', pd.Series([False]*len(df))) == True]
         print("\n" + "="*80)
         print("STATISTICS")
         print("="*80)
         print(f"Successful runs:     {len(successful_runs)} / {len(df)}")
-        print(f"Average speedup:     {successful_runs['speedup'].mean():.4f}x")
-        print(f"Best speedup:        {successful_runs['speedup'].max():.4f}x ({successful_runs.loc[successful_runs['speedup'].idxmax(), 'param_label']})")
-        print(f"Worst speedup:       {successful_runs['speedup'].min():.4f}x ({successful_runs.loc[successful_runs['speedup'].idxmin(), 'param_label']})")
-        print(f"Avg improvement:     {successful_runs['improvement_percent'].mean():+.2f}%")
         print("="*80)
     
     return 0

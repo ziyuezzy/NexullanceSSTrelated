@@ -69,11 +69,24 @@ def extract_config_from_filename(filename):
     for key, pattern in patterns.items():
         match = re.search(pattern, filename, re.IGNORECASE)
         if match:
-            value = match.group(1)
-            if value.isdigit():
-                config[key] = int(value)
+            # Get the first non-None group (handles alternation patterns)
+            value = None
+            for i in range(1, len(match.groups()) + 1):
+                if match.group(i) is not None:
+                    value = match.group(i)
+                    break
+            
+            if value is not None:
+                if value.isdigit():
+                    config[key] = int(value)
+                else:
+                    # Normalize topology names to lowercase for consistency
+                    if key == 'TOPO':
+                        config[key] = value.lower()
+                    else:
+                        config[key] = value
             else:
-                config[key] = value
+                config[key] = None
         else:
             config[key] = None
             

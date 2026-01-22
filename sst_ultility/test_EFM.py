@@ -23,55 +23,89 @@ from sst_ultility.ultility import run_ember_simulation, run_ember_experiment_wit
 
 def main():
     """
-    Main entry point for the complete Nexullance optimization workflow with EFM.
+    Main entry point for testing EFM simulations with all routing methods.
     
-    Uncomment the example you want to run:
-    - Example 1: Simple traffic demand collection only
-    - Example 2: Complete 5-step workflow with optimization and comparison
+    Tests all three routing methods:
+    - Example 1: Shortest-path routing (baseline)
+    - Example 2: UGAL adaptive routing
+    - Example 3: Complete Nexullance optimization workflow
     """
     
-    # # Example 1: Simple traffic demand collection
-    # print("\n" + "="*80)
-    # print("Example 1: Collecting traffic demand matrix only")
-    # print("="*80)
-    # run_ember_simulation(
-    #     topo_name="RRG",
-    #     V=16,
-    #     D=5,
-    #     benchmark="Allreduce",
-    #     bench_args=" iterations=50 count=512",
-    #     cores_per_ep=1,
-    #     link_bw=16,
-    #     enable_traffic_trace=True
-    # )
+    # Common configuration
+    topo_name = "RRG"
+    V = 16
+    D = 5
+    benchmark = "Allreduce"
+    bench_args = " iterations=50 count=512"
+    cores_per_ep = 1
+    link_bw = 16
+    num_threads = 8
     
-    # Example 2: Complete 5-step experiment with Nexullance optimization
+    # Example 1: Test shortest-path routing (baseline)
     print("\n" + "="*80)
-    print("COMPLETE EFM NEXULLANCE OPTIMIZATION WORKFLOW (5 STEPS)")
+    print("Example 1: Testing SHORTEST-PATH routing (baseline)")
+    print("="*80)
+    success_sp = run_ember_simulation(
+        topo_name=topo_name,
+        V=V,
+        D=D,
+        benchmark=benchmark,
+        bench_args=bench_args,
+        cores_per_ep=cores_per_ep,
+        link_bw=link_bw,
+        num_threads=num_threads,
+        enable_traffic_trace=False,
+        routing_method="shortest_path"
+    )
+    print(f"\n{'✓' if success_sp else '✗'} Shortest-path routing test {'PASSED' if success_sp else 'FAILED'}")
+    
+    # Example 2: Test UGAL adaptive routing
+    print("\n" + "="*80)
+    print("Example 2: Testing UGAL adaptive routing")
+    print("="*80)
+    success_ugal = run_ember_simulation(
+        topo_name=topo_name,
+        V=V,
+        D=D,
+        benchmark=benchmark,
+        bench_args=bench_args,
+        cores_per_ep=cores_per_ep,
+        link_bw=link_bw,
+        num_threads=num_threads,
+        enable_traffic_trace=False,
+        routing_method="ugal"
+    )
+    print(f"\n{'✓' if success_ugal else '✗'} UGAL routing test {'PASSED' if success_ugal else 'FAILED'}")
+    
+    # Example 3: Complete Nexullance optimization workflow
+    print("\n" + "="*80)
+    print("Example 3: Testing NEXULLANCE optimization workflow")
     print("="*80)
     print("This workflow will:")
-    print("  Step 1: Run baseline EFM simulation and collect traffic demand")
-    print("  Step 2: Run Nexullance optimization with collected demand")
-    print("  Step 3: Calculate and compare throughput improvements")
+    print("  Step 1: Run shortest-path baseline and collect traffic demand")
+    print("  Step 2: Run Nexullance-optimized simulation")
+    print("  Step 3: Calculate and compare simulation times")
     print("="*80 + "\n")
     
     results = run_ember_experiment_with_nexullance(
-        topo_name="RRG",
-        V=16,
-        D=5,
-        benchmark="Allreduce",
-        bench_args=" iterations=50 count=512",
-        cores_per_ep=1,
-        link_bw=16,
-        num_threads=8,
+        topo_name=topo_name,
+        V=V,
+        D=D,
+        benchmark=benchmark,
+        bench_args=bench_args,
+        cores_per_ep=cores_per_ep,
+        link_bw=link_bw,
+        num_threads=num_threads,
         traffic_collection_rate="10us",
         # Cap_core and Cap_access default to link_bw if not specified
-        demand_scaling_factor=1.0
+        demand_scaling_factor=10.0
     )
+    
+    success_nexullance = results is not None
     
     if results:
         print("\n" + "="*80)
-        print("FINAL SUMMARY")
+        print("NEXULLANCE WORKFLOW SUMMARY")
         print("="*80)
         print(f"Demand matrix:           {results['demand_file']}")
         if results.get('baseline_sim_time_ms') is not None:
@@ -88,11 +122,28 @@ def main():
         else:
             print(f"Speedup:                 Could not calculate (missing baseline or optimized time)")
         print("="*80)
-        return 0
     else:
         print("\n" + "="*80)
-        print("EXPERIMENT FAILED!")
+        print("NEXULLANCE WORKFLOW FAILED!")
         print("="*80)
+    
+    print(f"\n{'✓' if success_nexullance else '✗'} Nexullance workflow test {'PASSED' if success_nexullance else 'FAILED'}")
+    
+    # Overall summary
+    print("\n" + "="*80)
+    print("ALL TESTS SUMMARY")
+    print("="*80)
+    print(f"Shortest-path routing:   {'✓ PASSED' if success_sp else '✗ FAILED'}")
+    print(f"UGAL routing:            {'✓ PASSED' if success_ugal else '✗ FAILED'}")
+    print(f"Nexullance workflow:     {'✓ PASSED' if success_nexullance else '✗ FAILED'}")
+    print("="*80)
+    
+    all_passed = success_sp and success_ugal and success_nexullance
+    if all_passed:
+        print("\n✓ ALL TESTS PASSED!\n")
+        return 0
+    else:
+        print("\n✗ SOME TESTS FAILED!\n")
         return 1
 
 
