@@ -10,3 +10,4 @@ archive/
 *auto_config.py
 traffic_traces/*
 simulation_results/*
+debug_*/

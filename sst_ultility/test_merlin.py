@@ -55,14 +55,14 @@ def main():
     print("="*80 + "\n")
     
     results = run_merlin_experiment_with_nexullance(
-        topo_name="RRG",
-        V=16,
-        D=5,
+        topo_name="Slimfly",
+        V=50,
+        D=7,
         load=1.0,
-        traffic_pattern="uniform",
+        traffic_pattern="shift_half",
         link_bw=16,
         num_threads=8,
-        traffic_collection_rate="10us",
+        traffic_collection_rate="200us",
         # Cap_core and Cap_access default to link_bw if not specified
         demand_scaling_factor=10.0
     )

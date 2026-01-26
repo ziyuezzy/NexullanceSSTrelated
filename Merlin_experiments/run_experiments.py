@@ -32,7 +32,7 @@ def run_comparison_experiment(topo_name: str, V: int, D: int,
                               num_threads: int = 8,
                               load_start: float = 0.1,
                               load_end: float = 1.0,
-                              load_step: float = 0.1,
+                              load_step: float = 0.2,
                               routing_methods: list = None):
     """
     Run comparison experiment across multiple routing methods.
@@ -53,7 +53,7 @@ def run_comparison_experiment(topo_name: str, V: int, D: int,
         DataFrame with comparison results
     """
     if routing_methods is None:
-        routing_methods = ['shortest_path', 'nexullance', 'ugal']
+        routing_methods = ['shortest_path', 'nexullance', 'ugal', 'ugal_threshold']
     
     print("\n" + "="*80)
     print("ROUTING COMPARISON EXPERIMENT")
@@ -90,7 +90,7 @@ def run_comparison_experiment(topo_name: str, V: int, D: int,
                     traffic_pattern=traffic_pattern,
                     link_bw=link_bw,
                     num_threads=num_threads,
-                    traffic_collection_rate="10us",
+                    traffic_collection_rate="200us",
                     demand_scaling_factor=10.0
                 )
                 
@@ -215,8 +215,8 @@ def main():
     
     # Routing methods
     parser.add_argument('--routing-methods', nargs='+', 
-                        default=['shortest_path', 'nexullance', 'ugal'],
-                        choices=['shortest_path', 'nexullance', 'ugal'],
+                        default=['shortest_path', 'nexullance', 'ugal', 'ugal_threshold'],
+                        choices=['shortest_path', 'nexullance', 'ugal', 'ugal_threshold'],
                         help='Routing methods to compare')
     
     # System parameters

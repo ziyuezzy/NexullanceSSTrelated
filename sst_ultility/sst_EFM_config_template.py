@@ -168,6 +168,7 @@ if __name__ == "__main__":
     router.output_buf_size = "32kB"   
     router.num_vns = 2
     router.xbar_arb = "merlin.xbar_arb_rr"
+    router.oql_track_port = True
 
     topo.router = router
     topo.link_latency = "20ns"

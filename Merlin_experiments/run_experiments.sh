@@ -59,8 +59,8 @@ for config in "${CONFIGS[@]}"; do
             --link-bw 16 \
             --load-start 0.1 \
             --load-end 1.0 \
-            --load-step 0.1 \
-            --num-threads 8 \
+            --load-step 0.2 \
+            --num-threads 4 \
             --routing-methods shortest_path nexullance ugal
         
         if [ $? -ne 0 ]; then

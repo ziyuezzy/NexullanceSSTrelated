@@ -28,7 +28,7 @@ from sst_ultility.ultility import (
     run_merlin_experiment_with_nexullance,
     run_merlin_simulation
 )
-from topoResearch.global_helpers import sf_configs, ddf_configs, pf_configs
+from topoResearch.global_helpers import sf_configs_t1k, ddf_configs_t1k, pf_regular_configs_t1k
 
 
 def get_topology_configs(topo_name: str, max_routers: int = 1000):
@@ -45,11 +45,11 @@ def get_topology_configs(topo_name: str, max_routers: int = 1000):
     topo_name_lower = topo_name.lower()
     
     if 'slimfly' in topo_name_lower or topo_name_lower == 'sf':
-        configs = sf_configs
+        configs = sf_configs_t1k
     elif 'ddf' in topo_name_lower:
-        configs = ddf_configs
+        configs = ddf_configs_t1k
     elif 'polarfly' in topo_name_lower or topo_name_lower == 'pf':
-        configs = pf_configs
+        configs = pf_regular_configs_t1k
     else:
         raise ValueError(f"Unknown topology: {topo_name}. Use 'Slimfly', 'DDF', or 'Polarfly'")
     

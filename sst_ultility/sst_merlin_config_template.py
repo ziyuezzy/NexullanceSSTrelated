@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # Traffic tracing configuration
     gen_traffic_demand = 'traffic_demand_file' in config_dict
     traffic_demand_file = config_dict['traffic_demand_file'] if gen_traffic_demand else ""
-    traffic_collection_rate = config_dict.get('traffic_collection_rate', '10us')
+    traffic_collection_rate = config_dict.get('traffic_collection_rate', '200us')
     throughput_file = config_dict.get('throughput_file', f"load_{LOAD}.csv")
 
     topo_full_name=f"({V},{D}){topo_name}"
@@ -72,6 +72,12 @@ if __name__ == "__main__":
         routing_table = topo.calculate_routing_table()
         topo.source_routing_algo = "UGAL"
         print(f"Using UGAL adaptive routing with source routing table")
+        
+    elif routing_method == 'ugal_threshold':
+        # UGAL_THRESHOLD adaptive routing with source routing table
+        routing_table = topo.calculate_routing_table()
+        topo.source_routing_algo = "UGAL_THRESHOLD"
+        print(f"Using UGAL_THRESHOLD adaptive routing with source routing table")
         
     elif routing_method == 'nexullance':
         # Nexullance optimized routing with weighted paths
@@ -132,6 +138,7 @@ if __name__ == "__main__":
     router.output_buf_size = "32kB"   
     router.num_vns = 2
     router.xbar_arb = "merlin.xbar_arb_rr"
+    router.oql_track_port = True
 
     topo.router = router
     topo.link_latency = "20ns"

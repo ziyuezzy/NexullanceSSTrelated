@@ -44,12 +44,34 @@ def convert_nexullance_RT_to_SST_format(nexullance_RT):
     sst_routing_table = defaultdict(lambda: defaultdict(list))
     
     for (src, dst), path_weight_list in nexullance_RT.items():
+        valid_paths = []
+        long_path_weight = 0.0
+        
         for path, weight in path_weight_list:
-            # Convert format:
-            # 1. Swap order: (path, weight) -> (weight, path)
-            # 2. Exclude source from path: path[1:] to match SST convention
-            # 3. Restructure: {(src,dst): [...]} -> {src: {dst: [...]}}
-            sst_routing_table[src][dst].append((weight, path[1:]))
+            # Check if path exceeds 8 hops (path[1:] excludes source)
+            hop_count = len(path) - 1
+            if hop_count > 8:
+                print(f"WARNING: Path from {src} to {dst} exceeds 8 hops ({hop_count} hops): {path}")
+                print(f"         Weight {weight} will be redistributed to other paths.")
+                long_path_weight += weight
+            else:
+                valid_paths.append((path, weight))
+        
+        # If there are valid paths, redistribute the long path weight
+        if valid_paths:
+            if long_path_weight > 0:
+                # Distribute weight evenly among valid paths
+                additional_weight_per_path = long_path_weight / len(valid_paths)
+                for path, weight in valid_paths:
+                    new_weight = weight + additional_weight_per_path
+                    sst_routing_table[src][dst].append((new_weight, path[1:]))
+            else:
+                # No redistribution needed
+                for path, weight in valid_paths:
+                    sst_routing_table[src][dst].append((weight, path[1:]))
+        elif long_path_weight > 0:
+            # All paths were too long, print error
+            print(f"ERROR: All paths from {src} to {dst} exceed 8 hops. No valid routing available.")
     
     # Convert defaultdict to regular dict for cleaner serialization
     return {src: dict(dst_dict) for src, dst_dict in sst_routing_table.items()}
@@ -83,7 +105,6 @@ def _calculate_throughput_from_linkcontrol(throughput_file: str, sim_time_ns: in
     TOT_BW = TOT_bit / 8 / sim_time_us
     
     return TOT_BW
-
 
 def _extract_simulation_time_from_output(output_file: str) -> float:
     """
@@ -125,34 +146,36 @@ def _extract_simulation_time_from_output(output_file: str) -> float:
     return None
 
 
-def _generate_traffic_demand_filename(config_dict: dict, template_type: str) -> str:
+def _generate_traffic_demand_trace_filename(config_dict: dict, template_type: str) -> str:
     """
-    Generate a unique, descriptive filename for traffic demand matrix based on simulation parameters.
+    Generate a unique, descriptive filename for traffic demand/trace based on simulation parameters.
     
     Args:
         config_dict: Configuration dictionary
         template_type: 'merlin' or 'EFM'
         
     Returns:
-        Absolute path to traffic demand file
+        Absolute path to traffic file
     """
     V = config_dict['V']
     D = config_dict['D']
     EPR = (D + 1) // 2
     topo_name = config_dict['topo_name']
+    bw_cap = config_dict['UNIFIED_ROUTER_LINK_BW']
     
     if template_type == 'merlin':
         load = config_dict['LOAD']
         pattern = config_dict['traffic_pattern']
         # Format load to avoid decimal points in filename
         load_str = f"{load:.2f}".replace('.', 'p')
-        filename = f"traffic_merlin_{topo_name}_V{V}_D{D}_EPR{EPR}_load{load_str}_{pattern}.csv"
+        filename = f"traffic_merlin_{topo_name}_V{V}_D{D}_EPR{EPR}_linkBW{bw_cap}_load{load_str}_{pattern}.csv"
     else:  # EFM
         benchmark = config_dict['benchmark']
         bench_args = config_dict.get('benchargs', '')
         # Clean bench args for filename (remove spaces, special chars)
         bench_args_clean = bench_args.strip().replace(' ', '_').replace('=', '')
-        filename = f"traffic_EFM_{topo_name}_V{V}_D{D}_EPR{EPR}_{benchmark}_{bench_args_clean}.csv"
+        cores_per_ep = config_dict.get('Cores_per_EP', 1)
+        filename = f"traffic_efm_{topo_name}_V{V}_D{D}_EPR{EPR}_linkBW{bw_cap}_CPE{cores_per_ep}_{benchmark}{bench_args_clean}.csv"
     
     return str(TRAFFIC_TRACES_DIR / filename)
 
@@ -185,39 +208,6 @@ def _generate_throughput_filename(config_dict: dict, template_type: str) -> str:
         filename = f"throughput_EFM_{topo_name}_V{V}_D{D}_EPR{EPR}_{benchmark}_{bench_args_clean}.csv"
     
     return str(SIMULATION_RESULTS_DIR / filename)
-
-
-def _generate_traffic_trace_filename(config_dict: dict, template_type: str) -> str:
-    """
-    Generate a unique, descriptive filename for traffic trace based on simulation parameters.
-    
-    Args:
-        config_dict: Configuration dictionary
-        template_type: 'merlin' or 'EFM'
-        
-    Returns:
-        Absolute path to traffic trace file
-    """
-    V = config_dict['V']
-    D = config_dict['D']
-    EPR = (D + 1) // 2
-    topo_name = config_dict['topo_name']
-    
-    if template_type == 'merlin':
-        load = config_dict['LOAD']
-        pattern = config_dict['traffic_pattern']
-        # Format load to avoid decimal points in filename
-        load_str = f"{load:.2f}".replace('.', 'p')
-        filename = f"traffic_merlin_{topo_name}_V{V}_D{D}_EPR{EPR}_load{load_str}_{pattern}.csv"
-    else:  # EFM
-        benchmark = config_dict['benchmark']
-        bench_args = config_dict.get('benchargs', '')
-        # Clean bench args for filename (remove spaces, special chars)
-        bench_args_clean = bench_args.strip().replace(' ', '_').replace('=', '')
-        cores_per_ep = config_dict.get('Cores_per_EP', 1)
-        filename = f"traffic_efm_{topo_name}_V{V}_D{D}_EPR{EPR}_CPE{cores_per_ep}_{benchmark}{bench_args_clean}.csv"
-    
-    return str(TRAFFIC_TRACES_DIR / filename)
 
 
 def run_merlin_experiment_with_nexullance(topo_name: str, V: int, D: int, load: float,
@@ -261,10 +251,17 @@ def run_merlin_experiment_with_nexullance(topo_name: str, V: int, D: int, load: 
         'topo_name': topo_name,
         'LOAD': load,
         'traffic_pattern': traffic_pattern,
+        'traffic_collection_rate': traffic_collection_rate,
         'routing_method': 'shortest_path'  # Baseline uses shortest path
     }
     
-    demand_file = _generate_traffic_demand_filename(config, 'merlin')
+
+    demand_config = config.copy()
+    demand_config['LOAD'] = load*0.1
+    demand_config['UNIFIED_ROUTER_LINK_BW'] = link_bw*10
+    demand_file = _generate_traffic_demand_trace_filename(demand_config, 'merlin')
+    demand_config['traffic_demand_file'] = demand_file
+
     baseline_throughput_file = _generate_throughput_filename(config, 'merlin')
     baseline_throughput_file = baseline_throughput_file.replace('.csv', '_shortest_path.csv')
     
@@ -278,9 +275,6 @@ def run_merlin_experiment_with_nexullance(topo_name: str, V: int, D: int, load: 
         
         # First, collect demand matrix if needed
         if not Path(demand_file).exists():
-            demand_config = config.copy()
-            demand_config['traffic_demand_file'] = demand_file
-            demand_config['traffic_collection_rate'] = traffic_collection_rate
             
             print(f"Demand will be saved to: {demand_file}")
             stdout, stderr, returncode, sim_dir = _run_sst(demand_config, 'merlin', num_threads)
@@ -324,6 +318,7 @@ def run_merlin_experiment_with_nexullance(topo_name: str, V: int, D: int, load: 
         'traffic_pattern': traffic_pattern,
         'throughput_file': throughput_file,
         'nexullance_demand_matrix_file': demand_file,
+        'routing_method': 'nexullance',
         'Cap_core': Cap_core,
         'Cap_access': Cap_access,
         'demand_scaling_factor': demand_scaling_factor
@@ -439,7 +434,7 @@ def run_ember_experiment_with_nexullance(topo_name: str, V: int, D: int,
         'routing_method': 'shortest_path'  # Baseline uses shortest path
     }
     
-    demand_file = _generate_traffic_trace_filename(config, 'EFM')
+    demand_file = _generate_traffic_demand_trace_filename(config, 'EFM')
     
     # STEP 1: Run shortest-path baseline to collect demand
     if not Path(demand_file).exists():
@@ -589,7 +584,7 @@ def run_merlin_simulation(topo_name: str, V: int, D: int, load: float,
         output_traffic_demand: Whether to generate traffic demand (default: False)
         traffic_demand_file: Custom path for traffic demand (optional, auto-generated if empty)
         traffic_collection_rate: Statistics collection rate (default: "10us")
-        routing_method: Routing method ('shortest_path', 'ugal', default: 'shortest_path')
+        routing_method: Routing method ('shortest_path', 'ugal', 'ugal_threshold', 'nexullance', default: 'shortest_path')
         calculate_throughput: Whether to calculate and return throughput (default: True)
         **additional_config: Additional configuration parameters
         
@@ -610,7 +605,7 @@ def run_merlin_simulation(topo_name: str, V: int, D: int, load: float,
     # Generate traffic demand filename if tracing is enabled
     if output_traffic_demand:
         if not traffic_demand_file:
-            traffic_demand_file = _generate_traffic_demand_filename(config, 'merlin')
+            traffic_demand_file = _generate_traffic_demand_trace_filename(config, 'merlin')
         config['traffic_demand_file'] = traffic_demand_file
         config['traffic_collection_rate'] = traffic_collection_rate
         print(f"Traffic demand will be saved to: {traffic_demand_file}")
@@ -705,7 +700,7 @@ def run_ember_simulation(topo_name: str, V: int, D: int, benchmark: str,
     # Generate traffic trace filename if tracing is enabled
     if enable_traffic_trace:
         if not traffic_trace_file:
-            traffic_trace_file = _generate_traffic_trace_filename(config, 'EFM')
+            traffic_trace_file = _generate_traffic_demand_trace_filename(config, 'EFM')
         config['traffic_trace_file'] = traffic_trace_file
         print(f"Traffic trace will be saved to: {traffic_trace_file}")
     
@@ -771,10 +766,11 @@ def _run_sst(config_dict: dict, template_type: str, num_threads: int = 8):
         file.write(f"NEXULLANCE_MODULE_PATH = '{NEXULLANCE_MODULE_PATH}'\n")
         file.write(f"NEXULLANCE_CONTAINER_CLASS = '{NEXULLANCE_CONTAINER_CLASS}'\n\n")
         
-        # Write config dict
-        file.write("config_dict = ")
-        file.write(repr(config_dict))
-        file.write("\n\n")
+        # Write config dict in readable format
+        file.write("config_dict = {\n")
+        for key, value in config_dict.items():
+            file.write(f"    {repr(key)}: {repr(value)},\n")
+        file.write("}\n\n")
         
         # Append template content (without imports)
         with open(template_file, 'r') as template_file_handle:
