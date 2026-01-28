@@ -100,7 +100,7 @@ def _calculate_throughput_from_linkcontrol(throughput_file: str, sim_time_ns: in
     # Calculate total bits sent
     TOT_bit = filtered_df[' Sum.u64'].sum()
     
-    # Convert to Gbps: bits / 8 (bytes) / sim_time_us / 1000 (for Gbps)
+    # Convert to Gbps: bits / sim_time_us / 1000
     sim_time_us = sim_time_ns / 1000
     TOT_BW = TOT_bit / 8 / sim_time_us
     

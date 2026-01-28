@@ -154,7 +154,7 @@ def run_scaling_experiment(topo_name: str,
     """
     if routing_methods is None:
         routing_methods = ['shortest_path', 'ugal', 'nexullance']
-    
+
     # Get topology configurations
     configs = get_topology_configs(topo_name, max_routers)
     
@@ -225,13 +225,19 @@ def run_scaling_experiment(topo_name: str,
                     config_results[f'{method}_speedup'] = None
         
         all_results.append(config_results)
-        
+
         # Save intermediate results
         df_intermediate = pd.DataFrame(all_results)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        intermediate_csv = SCRIPT_DIR / f"scaling_{topo_name}_intermediate_{timestamp}.csv"
+        intermediate_csv = SCRIPT_DIR / f"scaling_{topo_name}_{traffic_pattern}_intermediate_{timestamp}.csv"
         df_intermediate.to_csv(intermediate_csv, index=False)
     
+        # Determine whether this configuration produced any successful runs
+        config_success = any(config_results.get(f"{m}_success", False) for m in routing_methods)
+        if not config_success:
+            print("No methods succeeded for this configuration. Terminating scaling sweep early.")
+            break
+
     # Create final results DataFrame
     df = pd.DataFrame(all_results)
     
@@ -240,7 +246,7 @@ def run_scaling_experiment(topo_name: str,
     
     # Save final results
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    results_csv = SCRIPT_DIR / f"scaling_{topo_name}_{timestamp}.csv"
+    results_csv = SCRIPT_DIR / f"scaling_{topo_name}_{traffic_pattern}_{timestamp}.csv"
     df.to_csv(results_csv, index=False)
     print(f"\n✓ Final results saved to: {results_csv}")
     

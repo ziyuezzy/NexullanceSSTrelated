@@ -78,6 +78,7 @@ def plot_comparison(df, topo_name, traffic_pattern, output_dir):
     
     ax1.set_xlabel('Offered Load', fontsize=12)
     ax1.set_ylabel('Throughput (Gbps)', fontsize=12)
+    ax1.set_ylim((0.0, 200))
     ax1.set_title(f'{topo_name} - {traffic_pattern.replace("_", " ").title()} Traffic\nThroughput vs Load', 
                   fontsize=13, fontweight='bold')
     ax1.legend(fontsize=11)
@@ -110,6 +111,7 @@ def plot_comparison(df, topo_name, traffic_pattern, output_dir):
     
     ax2.set_xlabel('Offered Load', fontsize=12)
     ax2.set_ylabel('Speedup vs Shortest Path', fontsize=12)
+    ax2.set_ylim((0.0, 2.5))
     ax2.set_title(f'{topo_name} - {traffic_pattern.replace("_", " ").title()} Traffic\nSpeedup Comparison', 
                   fontsize=13, fontweight='bold')
     ax2.legend(fontsize=11)

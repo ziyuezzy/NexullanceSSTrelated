@@ -1,0 +1,4 @@
+Routing Method,Avg Throughput (Gbps),Max Throughput (Gbps),Min Throughput (Gbps),Std Dev (Gbps),Successful Runs,Total Runs
+Nexullance,92.96101866666666,194.4,19.2,50.554650367215366,45,45
+Shortest Path,79.11470222222222,191.51864,19.2,48.55540149462527,45,45
+Ugal,91.64425422222222,194.4,19.2,49.47644455652308,45,45

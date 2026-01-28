@@ -9,6 +9,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import argparse
+import re
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -30,7 +31,65 @@ def load_scaling_results(results_file: str):
     return df, routing_methods
 
 
-def plot_performance_scaling(df: pd.DataFrame, routing_methods: list, topo_name: str, output_dir: Path):
+def filter_complete_configs(df: pd.DataFrame, routing_methods: list) -> pd.DataFrame:
+    """Return a DataFrame filtered to only include network sizes (V) that have
+    complete data across all present routing methods.
+
+    A V is considered complete if, for every routing method that provides a
+    throughput column in the dataset, the row(s) for that V have non-na
+    values for throughput and runtime, the `*_success` flag is True, and
+    `num_endpoints` is present and non-na.
+    """
+    if 'V' not in df.columns:
+        return df.copy()
+
+    required_base = ['num_endpoints']
+
+    # Determine which method-specific columns to check
+    method_checks = []
+    for method in routing_methods:
+        if f'{method}_throughput' in df.columns:
+            method_checks.append((f'{method}_throughput', f'{method}_success', f'{method}_runtime'))
+
+    complete_vs = set()
+    for v in sorted(df['V'].unique()):
+        sub = df[df['V'] == v]
+        ok = True
+
+        # Check base requirements
+        for col in required_base:
+            if col not in sub.columns or sub[col].isna().any():
+                ok = False
+                break
+
+        if not ok:
+            continue
+
+        # Check each method's required cols for this V
+        for throughput_col, success_col, runtime_col in method_checks:
+            if any(col not in sub.columns for col in (throughput_col, success_col, runtime_col)):
+                ok = False
+                break
+
+            # For all rows corresponding to this V, ensure values are present and success=True
+            for _, row in sub.iterrows():
+                if pd.isna(row[throughput_col]) or pd.isna(row[runtime_col]):
+                    ok = False
+                    break
+                if row[success_col] is not True:
+                    ok = False
+                    break
+            if not ok:
+                break
+
+        if ok:
+            complete_vs.add(v)
+
+    filtered = df[df['V'].isin(complete_vs)].copy()
+    return filtered
+
+
+def plot_performance_scaling(df: pd.DataFrame, routing_methods: list, topo_name: str, output_dir: Path, traffic_pattern: str):
     """Plot throughput vs network size for different routing methods."""
     
     fig, ax = plt.subplots(figsize=(12, 7))
@@ -61,13 +120,13 @@ def plot_performance_scaling(df: pd.DataFrame, routing_methods: list, topo_name:
     ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    output_file = output_dir / f'scaling_throughput_{topo_name}.png'
+    output_file = output_dir / f'scaling_throughput_{topo_name}_{traffic_pattern}.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"✓ Saved throughput plot: {output_file}")
     plt.close()
 
 
-def plot_speedup_scaling(df: pd.DataFrame, routing_methods: list, topo_name: str, output_dir: Path):
+def plot_speedup_scaling(df: pd.DataFrame, routing_methods: list, topo_name: str, output_dir: Path, traffic_pattern: str):
     """Plot speedup vs network size for advanced routing methods."""
     
     fig, ax = plt.subplots(figsize=(12, 7))
@@ -109,7 +168,7 @@ def plot_speedup_scaling(df: pd.DataFrame, routing_methods: list, topo_name: str
         ax.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        output_file = output_dir / f'scaling_speedup_{topo_name}.png'
+        output_file = output_dir / f'scaling_speedup_{topo_name}_{traffic_pattern}.png'
         plt.savefig(output_file, dpi=300, bbox_inches='tight')
         print(f"✓ Saved speedup plot: {output_file}")
     else:
@@ -118,7 +177,7 @@ def plot_speedup_scaling(df: pd.DataFrame, routing_methods: list, topo_name: str
     plt.close()
 
 
-def plot_runtime_scaling(df: pd.DataFrame, routing_methods: list, topo_name: str, output_dir: Path):
+def plot_runtime_scaling(df: pd.DataFrame, routing_methods: list, topo_name: str, output_dir: Path, traffic_pattern: str):
     """Plot simulation runtime vs network size."""
     
     fig, ax = plt.subplots(figsize=(12, 7))
@@ -150,13 +209,13 @@ def plot_runtime_scaling(df: pd.DataFrame, routing_methods: list, topo_name: str
     ax.set_yscale('log')  # Log scale for runtime
     
     plt.tight_layout()
-    output_file = output_dir / f'scaling_runtime_{topo_name}.png'
+    output_file = output_dir / f'scaling_runtime_{topo_name}_{traffic_pattern}.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"✓ Saved runtime plot: {output_file}")
     plt.close()
 
 
-def plot_combined_comparison(df: pd.DataFrame, routing_methods: list, topo_name: str, output_dir: Path):
+def plot_combined_comparison(df: pd.DataFrame, routing_methods: list, topo_name: str, output_dir: Path, traffic_pattern: str):
     """Create a combined figure with multiple subplots."""
     
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
@@ -252,7 +311,7 @@ def plot_combined_comparison(df: pd.DataFrame, routing_methods: list, topo_name:
     plt.suptitle(f'{topo_name} Network Scaling Analysis', fontsize=16, fontweight='bold', y=0.995)
     plt.tight_layout()
     
-    output_file = output_dir / f'scaling_combined_{topo_name}.png'
+    output_file = output_dir / f'scaling_combined_{topo_name}_{traffic_pattern}.png'
     plt.savefig(output_file, dpi=300, bbox_inches='tight')
     print(f"✓ Saved combined plot: {output_file}")
     plt.close()
@@ -263,44 +322,91 @@ def main():
         description='Plot network scaling experiment results'
     )
     
-    parser.add_argument('results_file', type=str,
-                        help='Path to scaling results CSV file')
+    parser.add_argument('results_files', nargs='*', type=str,
+                        help='Path(s) to scaling results CSV file(s). If omitted, all CSV files in the script directory will be processed.')
     parser.add_argument('--output-dir', type=str, default=None,
                         help='Output directory for plots (default: same as results file)')
     
     args = parser.parse_args()
     
-    # Load results
-    results_path = Path(args.results_file)
-    if not results_path.exists():
-        print(f"ERROR: Results file not found: {results_path}")
-        return 1
-    
-    df, routing_methods = load_scaling_results(results_path)
-    
-    # Determine output directory
-    if args.output_dir:
-        output_dir = Path(args.output_dir)
+    # Determine list of files to process
+    if args.results_files and len(args.results_files) > 0:
+        input_paths = [Path(p) for p in args.results_files]
     else:
-        output_dir = results_path.parent
-    
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Extract topology name from filename
-    topo_name = "Unknown"
-    for topo in ['Slimfly', 'DDF', 'Polarfly']:
-        if topo.lower() in results_path.stem.lower():
-            topo_name = topo
-            break
-    
-    print(f"\nGenerating plots for {topo_name}...")
-    print(f"Output directory: {output_dir}")
-    
-    # Generate plots
-    plot_performance_scaling(df, routing_methods, topo_name, output_dir)
-    plot_speedup_scaling(df, routing_methods, topo_name, output_dir)
-    plot_runtime_scaling(df, routing_methods, topo_name, output_dir)
-    plot_combined_comparison(df, routing_methods, topo_name, output_dir)
+        input_paths = sorted(SCRIPT_DIR.glob('*.csv'))
+
+    if len(input_paths) == 0:
+        print(f"ERROR: No CSV files found to process in {SCRIPT_DIR}")
+        return 1
+
+    exit_code = 0
+    for results_path in input_paths:
+        if not results_path.exists():
+            print(f"WARNING: Results file not found, skipping: {results_path}")
+            exit_code = 1
+            continue
+
+        df, routing_methods = load_scaling_results(results_path)
+
+        # Determine output directory per file
+        if args.output_dir:
+            output_dir = Path(args.output_dir)
+        else:
+            output_dir = results_path.parent
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Extract topology name from filename
+        topo_name = "Unknown"
+        for topo in ['Slimfly', 'DDF', 'Polarfly']:
+            if topo.lower() in results_path.stem.lower():
+                topo_name = topo
+                break
+
+        def extract_traffic_pattern(stem: str, topo_name: str) -> str:
+            s = stem.lower()
+            # Common explicit patterns
+            known = ['shift_half', 'shift_1', 'shift-1', 'shift', 'uniform', 'random']
+            for p in known:
+                if p in s:
+                    return p.replace('-', '_')
+
+            # Try to capture pattern between topology and timestamp (e.g. 'ddf_shift_half_2026...')
+            try:
+                m = re.search(rf"{re.escape(topo_name.lower())}_(.+?)_(\d{{6,}})", s)
+                if m:
+                    return m.group(1)
+            except Exception:
+                pass
+
+            # Fallback: attempt to capture non-digit segment before date
+            m2 = re.search(r'_(\D+?)_(\d{6,})', s)
+            if m2:
+                return m2.group(1).strip('_')
+
+            return 'unknown'
+
+        traffic_pattern = extract_traffic_pattern(results_path.stem, topo_name)
+
+        print(f"\nGenerating plots for {topo_name} ({results_path.name})...")
+        print(f"Output directory: {output_dir}")
+        print(f"Detected traffic pattern: {traffic_pattern}")
+
+        # Filter out V values (network sizes) that have incomplete data across methods
+        filtered_df = filter_complete_configs(df, routing_methods)
+        removed = len(df['V'].unique()) - len(filtered_df['V'].unique())
+        if removed > 0:
+            print(f"Removed {removed} network size(s) with incomplete data; plotting {len(filtered_df['V'].unique())} sizes.")
+        else:
+            print(f"All {len(filtered_df['V'].unique())} network sizes have complete data; plotting all.")
+
+        # Generate plots using the filtered dataframe
+        plot_performance_scaling(filtered_df, routing_methods, topo_name, output_dir, traffic_pattern)
+        plot_speedup_scaling(filtered_df, routing_methods, topo_name, output_dir, traffic_pattern)
+        plot_runtime_scaling(filtered_df, routing_methods, topo_name, output_dir, traffic_pattern)
+        plot_combined_comparison(filtered_df, routing_methods, topo_name, output_dir, traffic_pattern)
+
+    print("\n✓ All requested plots generated!")
+    return exit_code
     
     print("\n✓ All plots generated successfully!")
     return 0
